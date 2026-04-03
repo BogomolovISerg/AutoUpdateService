@@ -3,6 +3,7 @@ package git.autoupdateservice.web;
 import git.autoupdateservice.config.GitlabProperties;
 import git.autoupdateservice.domain.LogType;
 import git.autoupdateservice.service.AuditLogService;
+import git.autoupdateservice.service.DependencyGraphChangeDetector;
 import git.autoupdateservice.service.QueueService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ public class GitlabWebhookController {
     private final GitlabProperties gitlabProperties;
     private final QueueService queueService;
     private final AuditLogService auditLogService;
+    private final DependencyGraphChangeDetector dependencyGraphChangeDetector;
 
     @PostMapping("/webhook")
     public ResponseEntity<?> webhook(
@@ -126,6 +128,8 @@ public class GitlabWebhookController {
                 sourceKey,
                 ip
         );
+
+        dependencyGraphChangeDetector.analyzePushAndMarkStale(projectPath, beforeSha, commitSha, ip);
 
         return ResponseEntity.ok(Map.of(
                 "ok", true,

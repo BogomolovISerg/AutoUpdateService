@@ -11,6 +11,7 @@
     <a href="/settings">Настройки</a>
     <a href="/queue">Очередь</a>
     <a href="/logs">Логи</a>
+    <a href="/dependencies">Зависимости</a>
     <a href="/account/change-password">Сменить пароль</a>
     <form class="logout-form" th:action="@{/logout}" method="post">
         <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
@@ -39,6 +40,7 @@
                     <tr>
                         <th>запланировано</th>
                         <th>статус</th>
+                        <th>snapshot графа</th>
                         <th>ошибка</th>
                     </tr>
                     </thead>
@@ -46,6 +48,7 @@
                     <tr th:each="r : ${recentRuns}">
                         <td th:text="${plannedForFmt[r.id]} ?: '—'">—</td>
                         <td th:text="${r.status}">—</td>
+                        <td class="wrap" th:text="${dependencySnapshotFmt[r.id]} ?: '—'">—</td>
                         <td class="wrap" th:text="${r.errorSummary}">—</td>
                     </tr>
                     </tbody>

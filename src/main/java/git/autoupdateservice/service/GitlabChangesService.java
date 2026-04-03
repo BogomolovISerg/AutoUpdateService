@@ -3,10 +3,10 @@ package git.autoupdateservice.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import git.autoupdateservice.config.GitlabApiProperties;
-import git.autoupdateservice.domain.GitChangeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import git.autoupdateservice.domain.GitChangeType;
 
 import java.io.IOException;
 import java.net.URI;

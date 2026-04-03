@@ -40,6 +40,7 @@ public class UpdateExecutor {
 
     private final JdbcTemplate jdbcTemplate;
     private final RunnerLogsCleanupService runnerLogsCleanupService;
+    private final DependencyGraphStateService dependencyGraphStateService;
 
     private boolean tryAcquireRunLock() {
         Boolean ok = jdbcTemplate.queryForObject("select pg_try_advisory_lock(987654321)", Boolean.class);
@@ -58,20 +59,50 @@ public class UpdateExecutor {
 
             if (executionRunRepository.findByPlannedFor(plannedFor).isPresent()) return Optional.empty();
 
+            DependencyGraphState graphState = dependencyGraphStateService.getState();
+            DependencySnapshot activeSnapshot = graphState.getActiveSnapshot();
+
             ExecutionRun run = new ExecutionRun();
             run.setPlannedFor(plannedFor);
             run.setStartedAt(OffsetDateTime.now());
             run.setStatus(RunStatus.RUNNING);
+            run.setDependencySnapshot(activeSnapshot);
             run = executionRunRepository.save(run);
 
             auditLogService.info(
                     LogType.RUN_STARTED,
                     "Run started for planned_for=" + plannedFor,
-                    "{\"runId\":" + j(String.valueOf(run.getId())) + ",\"plannedFor\":" + j(String.valueOf(plannedFor)) + "}",
+                    "{\"runId\":" + j(String.valueOf(run.getId()))
+                            + ",\"plannedFor\":" + j(String.valueOf(plannedFor))
+                            + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
+                            + ",\"graphStale\":" + graphState.isGraphIsStale() + "}",
                     null,
                     "system",
                     run.getId()
             );
+
+            if (activeSnapshot == null) {
+                auditLogService.warn(
+                        LogType.RUN_STARTED,
+                        "Dependency graph snapshot is missing. Run will continue without linked snapshot.",
+                        "{\"runId\":" + j(String.valueOf(run.getId())) + ",\"graphStale\":" + graphState.isGraphIsStale() + "}",
+                        null,
+                        "system",
+                        run.getId()
+                );
+            } else if (graphState.isGraphIsStale()) {
+                auditLogService.warn(
+                        LogType.RUN_STARTED,
+                        "Dependency graph is stale. Run uses last READY snapshot " + activeSnapshot.getId(),
+                        "{\"runId\":" + j(String.valueOf(run.getId()))
+                                + ",\"dependencySnapshotId\":" + j(String.valueOf(activeSnapshot.getId()))
+                                + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
+                                + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason()) + "}",
+                        null,
+                        "system",
+                        run.getId()
+                );
+            }
 
             try {
                 runnerLogsCleanupService.cleanupOldRuns();

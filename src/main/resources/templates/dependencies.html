@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Зависимости</title>
+    <link rel="stylesheet" href="/app.css"/>
+</head>
+<body>
+<div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/settings">Настройки</a>
+    <a href="/queue">Очередь</a>
+    <a href="/logs">Логи</a>
+    <a href="/dependencies">Зависимости</a>
+    <a href="/account/change-password">Сменить пароль</a>
+    <form class="logout-form" th:action="@{/logout}" method="post">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button class="nav-btn" type="submit">Выход</button>
+    </form>
+</div>
+
+<div class="container">
+    <div class="card">
+        <h2>Зависимости общих модулей</h2>
+
+        <p class="small" th:if="${message != null}" th:text="${message}">Готово</p>
+        <p class="small" th:if="${error != null}" th:text="${error}">Ошибка</p>
+
+        <form method="post" action="/dependencies/source/save" class="row">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <div>
+                <label class="small">Имя источника</label>
+                <input class="input" type="text" name="sourceName"
+                       th:value="${baseSource != null ? baseSource.sourceName : 'Основная конфигурация'}"/>
+            </div>
+            <div>
+                <label class="small">Путь к исходникам</label>
+                <input class="input" type="text" name="rootPath"
+                       th:value="${baseSource != null ? baseSource.rootPath : ''}"/>
+            </div>
+            <div>
+                <label class="small">Активно</label>
+                <label>
+                    <input type="checkbox" name="enabled" value="true"
+                           th:checked="${baseSource == null or baseSource.enabled}"/>
+                    Да
+                </label>
+            </div>
+            <div class="row-actions">
+                <button class="btn" type="submit">Сохранить источник</button>
+            </div>
+        </form>
+
+        <form method="post" action="/dependencies/rebuild" style="margin-top:12px;">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <button class="btn secondary" type="submit">Полное сканирование</button>
+        </form>
+
+        <div class="card" th:if="${snapshot != null}" style="margin-top:12px;">
+            <p>Статус: <b th:text="${snapshot.status}">READY</b></p>
+            <p>Режим: <b th:text="${snapshot.buildMode}">FULL</b></p>
+            <p>Начало: <b th:text="${snapshot.startedAt}">-</b></p>
+            <p>Окончание: <b th:text="${snapshot.finishedAt} ?: '—'">-</b></p>
+            <p>Файлов просканировано: <b th:text="${snapshot.filesScanned}">0</b></p>
+            <p th:if="${snapshot.notes != null and !#strings.isEmpty(snapshot.notes)}">Примечание: <b th:text="${snapshot.notes}">-</b></p>
+        </div>
+
+        <div class="card" th:if="${graphState != null}" style="margin-top:12px;">
+            <p>Статус графа: <b th:text="${graphState.graphIsStale} ? 'Устарел' : 'Актуален'">Актуален</b></p>
+            <p>Активный snapshot: <b th:text="${graphState.activeSnapshot != null ? graphState.activeSnapshot.id : '—'}">—</b></p>
+            <p>Последнее изменение от Git: <b th:text="${graphState.lastGitChangeAt} ?: '—'">—</b></p>
+            <p>Последний rebuild: <b th:text="${graphState.lastRebuildAt} ?: '—'">—</b></p>
+            <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphState.staleSince}">—</b></p>
+            <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">Причина: <b th:text="${graphState.staleReason}">—</b></p>
+        </div>
+
+        <div class="card" th:if="${dirtyItems != null and !#lists.isEmpty(dirtyItems)}" style="margin-top:12px;">
+            <h3>Изменённые общие модули</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Источник</th>
+                        <th>Имя</th>
+                        <th>Модуль</th>
+                        <th>Путь</th>
+                        <th>Когда</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="d : ${dirtyItems}">
+                        <td th:text="${d.sourceKind}">BASE</td>
+                        <td th:text="${d.sourceName}">Основная конфигурация</td>
+                        <td th:text="${d.moduleName}">ОбщийМодуль</td>
+                        <td class="wrap" th:text="${d.changedPath}">CommonModules/...</td>
+                        <td th:text="${d.detectedAt}">—</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <form method="get" action="/dependencies" class="row" style="margin-top:12px;">
+            <div>
+                <label class="small">Режим</label>
+                <select class="input" name="mode">
+                    <option value="module" th:selected="${mode == 'module'}">По общему модулю</option>
+                    <option value="object" th:selected="${mode == 'object'}">По объекту</option>
+                </select>
+            </div>
+            <div>
+                <label class="small">Поиск</label>
+                <input class="input" type="text" name="q" th:value="${q}"/>
+            </div>
+            <div>
+                <label class="small">Тип объекта</label>
+                <select class="input" name="objectType">
+                    <option value="" th:selected="${objectType == null}">Все</option>
+                    <option value="CATALOG" th:selected="${objectType != null and objectType.name() == 'CATALOG'}">Справочник</option>
+                    <option value="DOCUMENT" th:selected="${objectType != null and objectType.name() == 'DOCUMENT'}">Документ</option>
+                    <option value="REPORT" th:selected="${objectType != null and objectType.name() == 'REPORT'}">Отчёт</option>
+                    <option value="COMMON_FORM" th:selected="${objectType != null and objectType.name() == 'COMMON_FORM'}">Общая форма</option>
+                    <option value="DATA_PROCESSOR" th:selected="${objectType != null and objectType.name() == 'DATA_PROCESSOR'}">Обработка</option>
+                </select>
+            </div>
+            <div class="row-actions">
+                <button class="btn" type="submit">Найти</button>
+            </div>
+        </form>
+
+        <div class="table-wrap" style="margin-top:12px;">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Общий модуль</th>
+                    <th>Тип объекта</th>
+                    <th>Объект</th>
+                    <th>Через модуль</th>
+                    <th>Через процедуру</th>
+                    <th>Путь</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:if="${#lists.isEmpty(rows)}">
+                    <td colspan="6" class="small">Данных нет</td>
+                </tr>
+                <tr th:each="r : ${rows}">
+                    <td th:text="${r.commonModuleName}">ОбщийМодуль</td>
+                    <td th:text="${r.objectType}">DOCUMENT</td>
+                    <td th:text="${r.objectName}">ЗаказПокупателя</td>
+                    <td th:text="${r.viaModule} ?: '—'">—</td>
+                    <td th:text="${r.viaMember} ?: '—'">—</td>
+                    <td class="wrap" th:text="${r.sourcePath}">Documents/...</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<div class="card" style="margin-top:12px;">
+    <h3>Журнал сканирования</h3>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Время</th>
+                <th>Уровень</th>
+                <th>Этап</th>
+                <th>Путь</th>
+                <th>Сообщение</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:if="${#lists.isEmpty(scanLogs)}">
+                <td colspan="5" class="small">Записей нет</td>
+            </tr>
+            <tr th:each="r : ${scanLogs}">
+                <td th:text="${r.createdAt}">2026-03-31 10:00</td>
+                <td th:text="${r.level}">INFO</td>
+                <td th:text="${r.phase}">READ_FILE_OK</td>
+                <td class="wrap" th:text="${r.sourcePath}">CommonModules/...</td>
+                <td class="wrap" th:text="${r.message}">Сообщение</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

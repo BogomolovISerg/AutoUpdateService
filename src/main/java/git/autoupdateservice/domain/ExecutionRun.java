@@ -30,4 +30,8 @@ public class ExecutionRun {
 
     @Column(name = "error_summary", length = 4000)
     private String errorSummary;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dependency_snapshot_id")
+    private DependencySnapshot dependencySnapshot;
 }

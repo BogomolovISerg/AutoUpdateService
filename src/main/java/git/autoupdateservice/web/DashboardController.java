@@ -41,12 +41,16 @@ public class DashboardController {
         }
 
         Map<UUID, String> plannedForFmt = new HashMap<>();
+        Map<UUID, String> dependencySnapshotFmt = new HashMap<>();
         for (var r : recentRuns) {
             if (r.getId() != null && r.getPlannedFor() != null) {
                 plannedForFmt.put(
                         r.getId(),
                         r.getPlannedFor().atZoneSameInstant(zone).format(TS_FMT)
                 );
+            }
+            if (r.getId() != null && r.getDependencySnapshot() != null && r.getDependencySnapshot().getId() != null) {
+                dependencySnapshotFmt.put(r.getId(), String.valueOf(r.getDependencySnapshot().getId()));
             }
         }
 
@@ -55,6 +59,7 @@ public class DashboardController {
         model.addAttribute("recentNewTasks", updateTaskRepository.findTop200ByStatusOrderByCreatedAtDesc(git.autoupdateservice.domain.TaskStatus.NEW));
         model.addAttribute("recentRuns", recentRuns);
         model.addAttribute("plannedForFmt", plannedForFmt);
+        model.addAttribute("dependencySnapshotFmt", dependencySnapshotFmt);
         model.addAttribute("actor", auth != null ? auth.getName() : "anonymous");
         return "dashboard";
     }
