@@ -39,6 +39,7 @@ public class UpdateExecutor {
     private final RunnerProperties runnerProperties;
 
     private final JdbcTemplate jdbcTemplate;
+    private final RunnerLogsCleanupService runnerLogsCleanupService;
 
     private boolean tryAcquireRunLock() {
         Boolean ok = jdbcTemplate.queryForObject("select pg_try_advisory_lock(987654321)", Boolean.class);
@@ -50,9 +51,11 @@ public class UpdateExecutor {
     }
 
     public Optional<ExecutionRun> runNightly(OffsetDateTime plannedFor) {
+
         if (!tryAcquireRunLock()) return Optional.empty();
 
         try {
+
             if (executionRunRepository.findByPlannedFor(plannedFor).isPresent()) return Optional.empty();
 
             ExecutionRun run = new ExecutionRun();
@@ -69,6 +72,29 @@ public class UpdateExecutor {
                     "system",
                     run.getId()
             );
+
+            try {
+                runnerLogsCleanupService.cleanupOldRuns();
+
+                auditLogService.info(
+                        LogType.RUN_STARTED,
+                        "Runner logs cleanup completed",
+                        "{\"stage\":\"cleanupOldRuns\"}",
+                        null,
+                        "system",
+                        run.getId()
+                );
+            } catch (Exception e) {
+                auditLogService.info(
+                        LogType.RUN_FAILED,
+                        "Runner logs cleanup failed: " + e.getMessage(),
+                        "{\"stage\":\"cleanupOldRuns\",\"error\":" + j(e.getMessage()) + "}",
+                        null,
+                        "system",
+                        run.getId()
+                );
+            }
+
 
             Settings s = settingsRepository.findById(1L).orElseThrow();
 

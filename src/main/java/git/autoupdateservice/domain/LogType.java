@@ -10,7 +10,7 @@ public enum LogType {
 
     RUN_STARTED,
     RUN_FINISHED,
-
+    RUN_FAILED,
     STEP_STARTED,
     STEP_FINISHED,
     STEP_FAILED,

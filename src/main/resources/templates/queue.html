@@ -64,7 +64,7 @@
                 </thead>
                 <tbody>
                 <tr th:each="t : ${tasks}">
-                    <td th:text="${createdAtFmt[t.id]}">—</td>
+                    <td th:text="${createdAtFmt[T(java.lang.String).valueOf(t.id)]} ?: '—'">—</td>
                     <td th:text="${t.projectPath}">—</td>
                     <td th:text="${t.targetType}">—</td>
                     <td th:text="${t.extensionName} ?: '—'">—</td>
@@ -96,14 +96,36 @@
             </table>
         </div>
 
-        <div class="pager" th:if="${page != null and page.totalPages > 1}">
-            <a class="btn secondary" th:if="${page.hasPrevious()}"
-               th:href="@{/queue(page=${page.number}, from=${from}, to=${to}, status=${status})}">← Назад</a>
-            <span class="small">Стр. <b th:text="${page.number + 1}">1</b> из <b th:text="${page.totalPages}">1</b>
-                · всего <b th:text="${page.totalElements}">0</b></span>
-            <a class="btn secondary" th:if="${page.hasNext()}"
-               th:href="@{/queue(page=${page.number + 2}, from=${from}, to=${to}, status=${status})}">Вперёд →</a>
-        </div>
+      <div class="pager" th:if="${totalPages != null and totalPages > 1}" style="margin-top:12px;">
+  <a class="btn secondary"
+     th:if="${page > 1}"
+     th:href="@{/queue(page=${page - 1}, from=${from}, to=${to}, status=${status})}">← Назад</a>
+
+  <span class="small">
+    Стр. <b th:text="${page}">1</b> из <b th:text="${totalPages}">1</b>
+    · всего <b th:text="${totalElements}">0</b>
+    · по <b th:text="${pageSize}">50</b>
+  </span>
+
+  <a class="btn secondary"
+     th:if="${page < totalPages}"
+     th:href="@{/queue(page=${page + 1}, from=${from}, to=${to}, status=${status})}">Вперёд →</a>
+</div>
+
+  <a class="btn secondary"
+     th:if="${page > 1}"
+     th:href="@{/queue(page=${page - 1}, from=${from}, to=${to}, status=${status})}">← Назад</a>
+
+  <span class="small">
+    Стр. <b th:text="${page}">1</b> из <b th:text="${totalPages}">1</b>
+    · всего <b th:text="${totalElements}">0</b>
+    · по <b th:text="${pageSize}">50</b>
+  </span>
+
+  <a class="btn secondary"
+     th:if="${page < totalPages}"
+     th:href="@{/queue(page=${page + 1}, from=${from}, to=${to}, status=${status})}">Вперёд →</a>
+</div>
     </div>
 </div>
 </body>

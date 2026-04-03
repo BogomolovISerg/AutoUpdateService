@@ -66,7 +66,8 @@ public class QueueController {
         Map<String, String> createdAtFmt = new HashMap<>();
         for (var t : tasks) {
             if (t.getId() != null && t.getCreatedAt() != null) {
-                createdAtFmt.put(t.getId().toString(), t.getCreatedAt().atZoneSameInstant(zone).format(fmt));
+                String ss = t.getCreatedAt().atZoneSameInstant(zone).format(fmt);
+                createdAtFmt.put(t.getId().toString(), ss);
             }
         }
         model.addAttribute("createdAtFmt", createdAtFmt);

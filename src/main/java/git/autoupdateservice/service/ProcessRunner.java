@@ -1,7 +1,7 @@
 package git.autoupdateservice.service;
 
 import git.autoupdateservice.config.RunnerProperties;
-import git.autoupdateservice.util.CommandFormatter;
+import git.autoupdateservice.util.CommandScriptWriter;
 import git.autoupdateservice.util.Platform;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -29,7 +29,7 @@ public class ProcessRunner {
         Files.createDirectories(stdoutFile.getParent());
         Files.createDirectories(stderrFile.getParent());
 
-        List<String> osCommand = wrapForOs(command);
+        List<String> osCommand = buildOsCommand(command, workDir, stdoutFile);
 
         ProcessBuilder pb = new ProcessBuilder(osCommand);
         pb.directory(workDir.toFile());
@@ -44,23 +44,45 @@ public class ProcessRunner {
             p.destroyForcibly();
             throw new IOException("Command timeout: " + String.join(" ", command));
         }
+
         int code = p.exitValue();
         long ms = Duration.between(start, Instant.now()).toMillis();
         return new Result(code, ms, stdoutFile, stderrFile);
     }
 
     /**
-     * На Windows запускаем через cmd.exe /c, предварительно выставляя кодовую страницу (chcp).
-     * Это помогает, когда в параметрах встречается кириллица, а исполняемый файл опирается на консольную кодировку.
+     * На Windows исполняем именно .cmd-файл, а не одну длинную строку через cmd /c "...".
+     * Это убирает расхождение между тем, что сохранено в cmd, и тем, что реально запускается.
      */
-    private List<String> wrapForOs(List<String> command) {
-        if (!Platform.isWindows()) return command;
+    private List<String> buildOsCommand(List<String> command, Path workDir, Path stdoutFile) throws IOException {
+        if (!Platform.isWindows()) {
+            return command;
+        }
 
         String comSpec = System.getenv("ComSpec");
         String cmdExe = (comSpec == null || comSpec.isBlank()) ? "cmd.exe" : comSpec;
 
-        String cmdLine = CommandFormatter.toCmdExeSingleLine(command, runnerProperties.windowsCodePage());
-        return List.of(cmdExe, "/c", cmdLine);
+        Path scriptFile = buildScriptPath(workDir, stdoutFile);
+        CommandScriptWriter.write(command, workDir, scriptFile, runnerProperties.windowsCodePage());
+
+        return List.of(
+                cmdExe,
+                "/d",
+                "/v:off",
+                "/c",
+                scriptFile.toAbsolutePath().toString()
+        );
+    }
+
+    private Path buildScriptPath(Path workDir, Path stdoutFile) {
+        String name = stdoutFile.getFileName().toString();
+
+        if (name.endsWith(".stdout.log")) {
+            name = name.substring(0, name.length() - ".stdout.log".length());
+        } else if (name.endsWith(".log")) {
+            name = name.substring(0, name.length() - ".log".length());
+        }
+
+        return workDir.resolve(name + ".cmd");
     }
 }
-
