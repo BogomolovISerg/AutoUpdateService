@@ -7,6 +7,7 @@ import git.autoupdateservice.repo.CodeSourceRootRepository;
 import git.autoupdateservice.service.DependencyGraphStateService;
 import git.autoupdateservice.service.DependencyTreeBuildService;
 import git.autoupdateservice.service.DependencyTreeSearchService;
+import git.autoupdateservice.repo.DependencyScanLogRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -23,6 +24,7 @@ public class DependenciesController {
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final CodeSourceRootRepository codeSourceRootRepository;
     private final DependencyGraphStateService dependencyGraphStateService;
+    private final DependencyScanLogRepository dependencyScanLogRepository;
 
     @GetMapping("/dependencies")
     public String page(
@@ -31,10 +33,15 @@ public class DependenciesController {
             @RequestParam(required = false) DependencyCallerType objectType,
             Model model
     ) {
+        var snapshot = dependencyTreeSearchService.latestSnapshot().orElse(null);
+        model.addAttribute("snapshot", snapshot);
+        model.addAttribute("scanLogs",
+                snapshot == null
+                        ? java.util.List.of()
+                        : dependencyScanLogRepository.findTop200BySnapshotOrderByCreatedAtDesc(snapshot));
         model.addAttribute("mode", mode);
         model.addAttribute("q", q);
         model.addAttribute("objectType", objectType);
-        model.addAttribute("snapshot", dependencyTreeSearchService.latestSnapshot().orElse(null));
         model.addAttribute("rows", dependencyTreeSearchService.findRows(mode, q, objectType));
         model.addAttribute("baseSource", codeSourceRootRepository.findFirstBySourceKindOrderByUpdatedAtDesc(SourceKind.BASE).orElse(null));
         model.addAttribute("graphState", dependencyGraphStateService.getState());

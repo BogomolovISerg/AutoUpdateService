@@ -6,17 +6,30 @@ import lombok.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
 public class BslDependencyParser {
 
-    private static final Pattern START_MEMBER = Pattern.compile("(?iu)^\\s*(Процедура|Функция)\\s+([\\p{L}_#][\\p{L}\\p{N}_#]*)");
-    private static final Pattern END_MEMBER = Pattern.compile("(?iu)^\\s*Конец(Процедуры|Функции)\\s*;?");
-    private static final Pattern QUALIFIED_CALL = Pattern.compile("(?iu)\\b([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\.\\s*([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(");
-    private static final Pattern LOCAL_CALL = Pattern.compile("(?iu)\\b([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(");
+    private static final Pattern START_MEMBER =
+            Pattern.compile("(?iu)^\\s*(Процедура|Функция)\\s+([\\p{L}_#][\\p{L}\\p{N}_#]*)");
+
+    private static final Pattern END_MEMBER =
+            Pattern.compile("(?iu)^\\s*Конец(Процедуры|Функции)\\s*;?");
+
+    private static final Pattern QUALIFIED_CALL =
+            Pattern.compile("(?iu)\\b([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\.\\s*([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(");
+
+    private static final Pattern LOCAL_CALL =
+            Pattern.compile("(?iu)\\b([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(");
 
     private static final Set<String> RESERVED_WORDS = Set.of(
             "если", "тогда", "иначе", "иначеесли", "конецесли",
@@ -39,41 +52,61 @@ public class BslDependencyParser {
             Set<String> excludedCallNames
     ) {
         String rel = normalize(sourceRoot.relativize(file));
-        String decodedRel = oneCNameDecoder.decodePathSegment(rel);
+        String decodedRel = oneCNameDecoder.decodePath(rel);
 
         ParsedOwner owner = determineOwner(decodedRel);
         if (owner == null) {
-            return ParsedFile.builder().callerType(null).callerName(null).calls(List.of()).build();
+            return ParsedFile.builder()
+                    .callerType(null)
+                    .callerName(null)
+                    .calls(List.of())
+                    .build();
         }
 
         String[] lines = fileText.split("\\R", -1);
-        Set<String> localMembers = collectMemberNames(lines);
+
+        Map<String, String> localMembersByLower = collectMemberNames(lines);
         Map<String, String> commonModulesByLower = toCaseInsensitiveMap(knownCommonModules);
         Set<String> excludedLower = toLowercaseSet(excludedCallNames);
 
         List<ParsedCall> calls = new ArrayList<>();
         Set<String> dedup = new LinkedHashSet<>();
+
         String currentMember = null;
+        StringBuilder currentBody = null;
 
         for (String rawLine : lines) {
             String line = stripComment(rawLine);
+
             Matcher start = START_MEMBER.matcher(line);
-            boolean declarationLine = false;
-            if (start.find()) {
+            if (currentMember == null && start.find()) {
                 currentMember = start.group(2);
-                declarationLine = true;
+                currentBody = new StringBuilder();
+                continue;
             }
 
-            if (currentMember != null && !declarationLine) {
-                collectQualifiedCalls(decodedRel, owner, currentMember, line, commonModulesByLower, dedup, calls);
-                if (owner.callerType() == DependencyCallerType.COMMON_MODULE) {
-                    collectLocalCalls(decodedRel, owner, currentMember, line, localMembers, excludedLower, dedup, calls);
+            if (currentMember != null) {
+                Matcher end = END_MEMBER.matcher(line);
+                if (end.find()) {
+                    processMemberBody(
+                            decodedRel,
+                            owner,
+                            currentMember,
+                            currentBody == null ? "" : currentBody.toString(),
+                            localMembersByLower,
+                            commonModulesByLower,
+                            excludedLower,
+                            dedup,
+                            calls
+                    );
+                    currentMember = null;
+                    currentBody = null;
+                    continue;
                 }
-            }
 
-            Matcher end = END_MEMBER.matcher(line);
-            if (end.find()) {
-                currentMember = null;
+                if (currentBody != null) {
+                    currentBody.append(line).append('\n');
+                }
             }
         }
 
@@ -84,23 +117,60 @@ public class BslDependencyParser {
                 .build();
     }
 
+    private void processMemberBody(
+            String decodedRel,
+            ParsedOwner owner,
+            String currentMember,
+            String memberBody,
+            Map<String, String> localMembersByLower,
+            Map<String, String> commonModulesByLower,
+            Set<String> excludedLower,
+            Set<String> dedup,
+            List<ParsedCall> calls
+    ) {
+        collectQualifiedCalls(
+                decodedRel,
+                owner,
+                currentMember,
+                memberBody,
+                commonModulesByLower,
+                dedup,
+                calls
+        );
+
+        if (owner.callerType() == DependencyCallerType.COMMON_MODULE) {
+            collectLocalCalls(
+                    decodedRel,
+                    owner,
+                    currentMember,
+                    memberBody,
+                    localMembersByLower,
+                    excludedLower,
+                    dedup,
+                    calls
+            );
+        }
+    }
+
     private void collectQualifiedCalls(
             String decodedRel,
             ParsedOwner owner,
             String currentMember,
-            String line,
+            String body,
             Map<String, String> commonModulesByLower,
             Set<String> dedup,
             List<ParsedCall> calls
     ) {
-        Matcher matcher = QUALIFIED_CALL.matcher(line);
+        Matcher matcher = QUALIFIED_CALL.matcher(body);
         while (matcher.find()) {
             String left = matcher.group(1);
             String right = matcher.group(2);
+
             String moduleName = commonModulesByLower.get(left.toLowerCase(Locale.ROOT));
             if (moduleName == null) {
                 continue;
             }
+
             addCall(decodedRel, owner, currentMember, moduleName, right, dedup, calls);
         }
     }
@@ -109,28 +179,36 @@ public class BslDependencyParser {
             String decodedRel,
             ParsedOwner owner,
             String currentMember,
-            String line,
-            Set<String> localMembers,
+            String body,
+            Map<String, String> localMembersByLower,
             Set<String> excludedLower,
             Set<String> dedup,
             List<ParsedCall> calls
     ) {
-        Matcher matcher = LOCAL_CALL.matcher(line);
+        Matcher matcher = LOCAL_CALL.matcher(body);
         while (matcher.find()) {
             int start = matcher.start(1);
-            if (isQualifiedCall(line, start)) {
+            if (isQualifiedCall(body, start)) {
                 continue;
             }
 
             String candidate = matcher.group(1);
             String candidateLower = candidate.toLowerCase(Locale.ROOT);
+
             if (RESERVED_WORDS.contains(candidateLower) || excludedLower.contains(candidateLower)) {
                 continue;
             }
-            if (!localMembers.contains(candidate)) {
+
+            String canonicalMember = localMembersByLower.get(candidateLower);
+            if (canonicalMember == null) {
                 continue;
             }
-            addCall(decodedRel, owner, currentMember, owner.callerName(), candidate, dedup, calls);
+
+            if (currentMember != null && candidateLower.equals(currentMember.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+
+            addCall(decodedRel, owner, currentMember, owner.callerName(), canonicalMember, dedup, calls);
         }
     }
 
@@ -143,7 +221,13 @@ public class BslDependencyParser {
             Set<String> dedup,
             List<ParsedCall> calls
     ) {
-        String key = owner.callerType() + "|" + owner.callerName() + "|" + nvl(currentMember) + "|" + calleeModule + "|" + nvl(calleeMember) + "|" + decodedRel;
+        String key = owner.callerType()
+                + "|" + owner.callerName()
+                + "|" + nvl(currentMember)
+                + "|" + calleeModule
+                + "|" + nvl(calleeMember)
+                + "|" + decodedRel;
+
         if (!dedup.add(key)) {
             return;
         }
@@ -158,7 +242,9 @@ public class BslDependencyParser {
 
     private ParsedOwner determineOwner(String decodedRel) {
         String[] parts = decodedRel.split("/");
-        if (parts.length < 2) return null;
+        if (parts.length < 2) {
+            return null;
+        }
 
         String root = parts[0].toLowerCase(Locale.ROOT);
         String name = parts[1];
@@ -174,13 +260,14 @@ public class BslDependencyParser {
         };
     }
 
-    private Set<String> collectMemberNames(String[] lines) {
-        Set<String> names = new LinkedHashSet<>();
+    private Map<String, String> collectMemberNames(String[] lines) {
+        Map<String, String> names = new HashMap<>();
         for (String rawLine : lines) {
             String line = stripComment(rawLine);
             Matcher start = START_MEMBER.matcher(line);
             if (start.find()) {
-                names.add(start.group(2));
+                String memberName = start.group(2);
+                names.put(memberName.toLowerCase(Locale.ROOT), memberName);
             }
         }
         return names;
@@ -201,7 +288,7 @@ public class BslDependencyParser {
     }
 
     private Set<String> toLowercaseSet(Set<String> values) {
-        Set<String> out = new HashSet<>();
+        Set<String> out = new LinkedHashSet<>();
         if (values == null) {
             return out;
         }
@@ -214,20 +301,40 @@ public class BslDependencyParser {
         return out;
     }
 
-    private boolean isQualifiedCall(String line, int tokenStart) {
+    private boolean isQualifiedCall(String text, int tokenStart) {
         int i = tokenStart - 1;
-        while (i >= 0 && Character.isWhitespace(line.charAt(i))) {
+        while (i >= 0 && Character.isWhitespace(text.charAt(i))) {
             i--;
         }
-        return i >= 0 && line.charAt(i) == '.';
+        return i >= 0 && text.charAt(i) == '.';
     }
 
     private String stripComment(String line) {
         if (line == null || line.isEmpty()) {
             return "";
         }
-        int idx = line.indexOf("//");
-        return idx >= 0 ? line.substring(0, idx) : line;
+
+        boolean inString = false;
+
+        for (int i = 0; i < line.length() - 1; i++) {
+            char ch = line.charAt(i);
+            char next = line.charAt(i + 1);
+
+            if (ch == '"') {
+                if (inString && next == '"') {
+                    i++;
+                    continue;
+                }
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString && ch == '/' && next == '/') {
+                return line.substring(0, i);
+            }
+        }
+
+        return line;
     }
 
     private static String normalize(Path path) {

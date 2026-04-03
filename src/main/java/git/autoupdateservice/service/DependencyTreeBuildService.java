@@ -6,7 +6,6 @@ import git.autoupdateservice.domain.DependencyBuildMode;
 import git.autoupdateservice.domain.DependencyCallExclusion;
 import git.autoupdateservice.domain.DependencyCallerType;
 import git.autoupdateservice.domain.DependencyEdge;
-import git.autoupdateservice.domain.DependencyScanLog;
 import git.autoupdateservice.domain.DependencySnapshot;
 import git.autoupdateservice.domain.DependencySnapshotStatus;
 import git.autoupdateservice.domain.SourceKind;
@@ -14,7 +13,6 @@ import git.autoupdateservice.repo.CodeSourceRootRepository;
 import git.autoupdateservice.repo.CommonModuleImpactRepository;
 import git.autoupdateservice.repo.DependencyCallExclusionRepository;
 import git.autoupdateservice.repo.DependencyEdgeRepository;
-import git.autoupdateservice.repo.DependencyScanLogRepository;
 import git.autoupdateservice.repo.DependencySnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -23,8 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,12 +54,12 @@ public class DependencyTreeBuildService {
             "DataProcessors"
     );
 
+    private final DependencyGraphStateService dependencyGraphStateService;
     private final CodeSourceRootRepository codeSourceRootRepository;
     private final DependencySnapshotRepository dependencySnapshotRepository;
     private final DependencyEdgeRepository dependencyEdgeRepository;
     private final CommonModuleImpactRepository commonModuleImpactRepository;
     private final DependencyCallExclusionRepository dependencyCallExclusionRepository;
-    private final DependencyScanLogRepository dependencyScanLogRepository;
     private final BslDependencyParser bslDependencyParser;
     private final OneCNameDecoder oneCNameDecoder;
 
@@ -89,50 +85,52 @@ public class DependencyTreeBuildService {
         snapshot.setNotes("Запущено полное сканирование");
         snapshot = dependencySnapshotRepository.save(snapshot);
 
-        logInfo(snapshot, "START", sourceRoot.getRootPath(),
-                "Start dependency rebuild. sourceRootId=" + sourceRoot.getId()
-                        + ", sourceName=" + sourceRoot.getSourceName()
-                        + ", rootPath=" + sourceRoot.getRootPath());
+        log.info("[DEP-SCAN:START] Start dependency rebuild. sourceRootId={}, sourceName={}, rootPath={}",
+                sourceRoot.getId(), sourceRoot.getSourceName(), sourceRoot.getRootPath());
 
         try {
             BuildArtifacts artifacts = scanSource(sourceRoot, snapshot);
 
             if (!artifacts.edges().isEmpty()) {
                 dependencyEdgeRepository.saveAll(artifacts.edges());
-                logInfo(snapshot, "SAVE_EDGES", sourceRoot.getRootPath(),
-                        "Saved dependency edges: " + artifacts.edges().size());
+                log.info("[DEP-SCAN:SAVE_EDGES] Saved dependency edges: {} | path={}",
+                        artifacts.edges().size(), sourceRoot.getRootPath());
             } else {
-                logInfo(snapshot, "SAVE_EDGES", sourceRoot.getRootPath(), "No dependency edges to save");
+                log.info("[DEP-SCAN:SAVE_EDGES] No dependency edges to save | path={}", sourceRoot.getRootPath());
             }
 
             if (!artifacts.impacts().isEmpty()) {
                 commonModuleImpactRepository.saveAll(artifacts.impacts());
-                logInfo(snapshot, "SAVE_IMPACTS", sourceRoot.getRootPath(),
-                        "Saved common module impacts: " + artifacts.impacts().size());
+                log.info("[DEP-SCAN:SAVE_IMPACTS] Saved common module impacts: {} | path={}",
+                        artifacts.impacts().size(), sourceRoot.getRootPath());
             } else {
-                logInfo(snapshot, "SAVE_IMPACTS", sourceRoot.getRootPath(), "No common module impacts to save");
+                log.info("[DEP-SCAN:SAVE_IMPACTS] No common module impacts to save | path={}", sourceRoot.getRootPath());
             }
 
             snapshot.setFilesScanned(artifacts.filesScanned());
             snapshot.setStatus(DependencySnapshotStatus.READY);
             snapshot.setFinishedAt(OffsetDateTime.now());
-            snapshot.setNotes("Полное сканирование выполнено");
+            snapshot.setNotes(buildFinishNotes(artifacts));
             snapshot = dependencySnapshotRepository.save(snapshot);
 
-            logInfo(snapshot, "FINISH", sourceRoot.getRootPath(),
-                    "Rebuild finished successfully. filesScanned=" + artifacts.filesScanned()
-                            + ", edges=" + artifacts.edges().size()
-                            + ", impacts=" + artifacts.impacts().size());
+            dependencyGraphStateService.markSnapshotReady(snapshot);
+
+            log.info("[DEP-SCAN:FINISH] Rebuild finished successfully. filesScanned={}, skipped={}, edges={}, impacts={} | path={}",
+                    artifacts.filesScanned(),
+                    artifacts.skippedFiles(),
+                    artifacts.edges().size(),
+                    artifacts.impacts().size(),
+                    sourceRoot.getRootPath());
 
             return snapshot;
         } catch (Exception e) {
             snapshot.setStatus(DependencySnapshotStatus.FAILED);
             snapshot.setFinishedAt(OffsetDateTime.now());
-            snapshot.setNotes(safeText(errorMessage(e), 4000));
+            snapshot.setNotes(errorMessage(e));
             snapshot = dependencySnapshotRepository.save(snapshot);
 
-            logError(snapshot, "REBUILD_FAILED", sourceRoot.getRootPath(),
-                    "Dependency rebuild failed: " + errorMessage(e), e);
+            log.error("[DEP-SCAN:REBUILD_FAILED] Dependency rebuild failed: {} | path={}",
+                    errorMessage(e), sourceRoot.getRootPath(), e);
 
             return snapshot;
         }
@@ -141,12 +139,10 @@ public class DependencyTreeBuildService {
     private BuildArtifacts scanSource(CodeSourceRoot sourceRoot, DependencySnapshot snapshot) throws IOException {
         Path root = Path.of(sourceRoot.getRootPath()).toAbsolutePath().normalize();
 
-        logInfo(snapshot, "ROOT_CHECK", root.toString(), "Checking source root");
+        log.info("[DEP-SCAN:ROOT_CHECK] Checking source root | path={}", root);
 
         if (!Files.isDirectory(root)) {
-            IllegalStateException e = new IllegalStateException("Каталог исходников не найден: " + root);
-            logError(snapshot, "ROOT_INVALID", root.toString(), e.getMessage(), e);
-            throw e;
+            throw new IllegalStateException("Каталог исходников не найден: " + root);
         }
 
         List<Path> bslFiles;
@@ -159,61 +155,51 @@ public class DependencyTreeBuildService {
                     .toList();
         }
 
-        logInfo(snapshot, "DISCOVER", root.toString(), "Found BSL files: " + bslFiles.size());
+        log.info("[DEP-SCAN:DISCOVER] Found BSL files: {} | path={}", bslFiles.size(), root);
 
         Set<String> knownCommonModules = collectKnownCommonModules(root, bslFiles);
-        logInfo(snapshot, "COMMON_MODULES", root.toString(),
-                "Known common modules: " + knownCommonModules.size());
+        log.info("[DEP-SCAN:COMMON_MODULES] Known common modules: {} | path={}", knownCommonModules.size(), root);
 
         Set<String> excludedCalls = dependencyCallExclusionRepository.findAllByEnabledIsTrueOrderByCallNameAsc().stream()
                 .map(DependencyCallExclusion::getCallName)
                 .filter(Objects::nonNull)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 
-        logInfo(snapshot, "EXCLUSIONS", root.toString(),
-                "Excluded calls loaded: " + excludedCalls.size());
+        log.info("[DEP-SCAN:EXCLUSIONS] Excluded calls loaded: {} | path={}", excludedCalls.size(), root);
 
         List<DependencyEdge> edges = new ArrayList<>();
         Map<ObjectKey, List<DependencyEdge>> objectDirectEdges = new LinkedHashMap<>();
         Map<MemberKey, List<DependencyEdge>> commonModuleEdges = new LinkedHashMap<>();
+        List<String> skippedFileMessages = new ArrayList<>();
 
         int filesProcessed = 0;
+        int skippedFiles = 0;
 
         for (Path file : bslFiles) {
             String rel = null;
             String decodedRel = null;
-            String text = null;
 
             try {
-                logInfo(snapshot, "FILE_START", file.toString(), "Processing file");
+                log.info("[DEP-SCAN:FILE_START] Processing file | path={}", file);
 
-                logInfo(snapshot, "RELATIVIZE_START", file.toString(), "Start relativize");
                 rel = normalizeRel(root.relativize(file));
-                logInfo(snapshot, "RELATIVIZE_OK", file.toString(), "rel=" + rel);
+                log.info("[DEP-SCAN:RELATIVIZE_OK] rel={} | path={}", rel, file);
 
-                logInfo(snapshot, "DECODE_PATH_START", file.toString(), "decode input=" + rel);
                 decodedRel = oneCNameDecoder.decodePath(rel);
-                logInfo(snapshot, "DECODE_PATH_OK", file.toString(), "decodedRel=" + decodedRel);
+                log.info("[DEP-SCAN:DECODE_PATH_OK] decodedRel={} | path={}", decodedRel, file);
 
-                logInfo(snapshot, "READ_FILE_START", file.toString(), "Start read file");
-                text = Files.readString(file, StandardCharsets.UTF_8);
-                logInfo(snapshot, "READ_FILE_OK", file.toString(), "textLength=" + text.length());
+                String text = Files.readString(file, StandardCharsets.UTF_8);
+                log.info("[DEP-SCAN:READ_FILE_OK] textLength={} | path={}", text.length(), file);
 
-                logInfo(snapshot, "PARSE_FILE_START", file.toString(), "Start parse file");
                 BslDependencyParser.ParsedFile parsed =
                         bslDependencyParser.parse(file, text, root, knownCommonModules, excludedCalls);
 
                 int callCount = parsed.getCalls() == null ? 0 : parsed.getCalls().size();
-                logInfo(snapshot, "PARSE_FILE_OK", file.toString(),
-                        "callerType=" + parsed.getCallerType()
-                                + ", callerName=" + parsed.getCallerName()
-                                + ", calls=" + callCount);
+                log.info("[DEP-SCAN:PARSE_FILE_OK] callerType={}, callerName={}, calls={} | path={}",
+                        parsed.getCallerType(), parsed.getCallerName(), callCount, file);
 
                 if (parsed.getCallerType() == null || parsed.getCallerName() == null || parsed.getCalls() == null) {
-                    logWarn(snapshot, "FILE_SKIPPED", file.toString(),
-                            "Parsed file has no caller or calls. rel=" + rel + ", decodedRel=" + decodedRel);
-                    filesProcessed++;
-                    snapshot.setFilesScanned(filesProcessed);
+                    log.info("[DEP-SCAN:FILE_SKIPPED_EMPTY] Parsed file has no caller or calls | path={}", file);
                     continue;
                 }
 
@@ -245,26 +231,43 @@ public class DependencyTreeBuildService {
                 filesProcessed++;
                 snapshot.setFilesScanned(filesProcessed);
 
-                logInfo(snapshot, "FILE_OK", file.toString(),
-                        "Processed successfully. totalProcessed=" + filesProcessed
-                                + ", totalEdges=" + edges.size());
+                log.info("[DEP-SCAN:FILE_OK] Processed successfully. processed={}, edges={} | path={}",
+                        filesProcessed, edges.size(), file);
+
             } catch (Exception e) {
-                snapshot.setFilesScanned(filesProcessed);
-                logError(snapshot, "FILE_FAILED", file.toString(),
-                        "rel=" + rel + ", decodedRel=" + decodedRel + ", error=" + errorMessage(e), e);
-                throw e;
+                skippedFiles++;
+
+                String msg = "Пропущен файл: " + file
+                        + " | rel=" + nvl(rel)
+                        + " | decodedRel=" + nvl(decodedRel)
+                        + " | error=" + errorMessage(e);
+
+                skippedFileMessages.add(msg);
+                log.warn("[DEP-SCAN:FILE_SKIPPED_ERROR] {}", msg, e);
+
+                continue;
             }
         }
 
-        logInfo(snapshot, "BUILD_IMPACTS_START", root.toString(),
-                "Building impacts. objectKeys=" + objectDirectEdges.size()
-                        + ", commonModuleKeys=" + commonModuleEdges.size());
+        log.info("[DEP-SCAN:BUILD_IMPACTS_START] objectKeys={}, commonModuleKeys={} | path={}",
+                objectDirectEdges.size(), commonModuleEdges.size(), root);
 
         List<CommonModuleImpact> impacts = buildImpacts(snapshot, objectDirectEdges, commonModuleEdges);
 
-        logInfo(snapshot, "BUILD_IMPACTS_OK", root.toString(), "Impacts built: " + impacts.size());
+        log.info("[DEP-SCAN:BUILD_IMPACTS_OK] impacts={} | path={}", impacts.size(), root);
+        log.info("[DEP-SCAN:FINISH_SCAN] processed={}, skipped={}, edges={}, impacts={} | path={}",
+                filesProcessed, skippedFiles, edges.size(), impacts.size(), root);
 
-        return new BuildArtifacts(filesProcessed, edges, impacts);
+        int previewLimit = Math.min(skippedFileMessages.size(), 50);
+        for (int i = 0; i < previewLimit; i++) {
+            log.warn("[DEP-SCAN:SKIPPED_FILE] {}", skippedFileMessages.get(i));
+        }
+        if (skippedFileMessages.size() > previewLimit) {
+            log.warn("[DEP-SCAN:SKIPPED_FILE] Всего пропущено файлов: {}. В лог выведены первые {}.",
+                    skippedFileMessages.size(), previewLimit);
+        }
+
+        return new BuildArtifacts(filesProcessed, skippedFiles, skippedFileMessages, edges, impacts);
     }
 
     private Set<String> collectKnownCommonModules(Path sourceRoot, List<Path> bslFiles) {
@@ -347,6 +350,23 @@ public class DependencyTreeBuildService {
         return relPath.toString().replace('\\', '/');
     }
 
+    private String buildFinishNotes(BuildArtifacts artifacts) {
+        String base = "Полное сканирование выполнено. Обработано: "
+                + artifacts.filesScanned()
+                + ", пропущено: "
+                + artifacts.skippedFiles();
+
+        if (artifacts.skippedFiles() == 0) {
+            return base;
+        }
+
+        List<String> preview = artifacts.skippedFileMessages().stream()
+                .limit(3)
+                .toList();
+
+        return base + ". Первые ошибки: " + String.join(" ; ", preview);
+    }
+
     private String errorMessage(Throwable e) {
         String message = e.getMessage();
         if (message == null || message.isBlank()) {
@@ -359,72 +379,15 @@ public class DependencyTreeBuildService {
         return s == null ? "" : s;
     }
 
-    private record BuildArtifacts(int filesScanned, List<DependencyEdge> edges, List<CommonModuleImpact> impacts) {}
+    private record BuildArtifacts(
+            int filesScanned,
+            int skippedFiles,
+            List<String> skippedFileMessages,
+            List<DependencyEdge> edges,
+            List<CommonModuleImpact> impacts
+    ) {}
+
     private record ObjectKey(DependencyCallerType type, String name, String sourcePath) {}
     private record MemberKey(String module, String member) {}
     private record Traversal(String module, String member, String viaModule, String viaMember) {}
-
-    private void logInfo(DependencySnapshot snapshot, String phase, String sourcePath, String message) {
-        logScan(snapshot, "INFO", phase, sourcePath, message, null);
-    }
-
-    private void logWarn(DependencySnapshot snapshot, String phase, String sourcePath, String message) {
-        logScan(snapshot, "WARN", phase, sourcePath, message, null);
-    }
-
-    private void logError(DependencySnapshot snapshot, String phase, String sourcePath, String message, Throwable error) {
-        logScan(snapshot, "ERROR", phase, sourcePath, message, error);
-    }
-
-    private void logScan(DependencySnapshot snapshot,
-                         String level,
-                         String phase,
-                         String sourcePath,
-                         String message,
-                         Throwable error) {
-        try {
-            DependencyScanLog row = new DependencyScanLog();
-            row.setSnapshot(snapshot);
-            row.setLevel(level);
-            row.setPhase(phase);
-            row.setSourcePath(trimToNull(sourcePath));
-            row.setMessage(safeText(message, 20000));
-            row.setStacktrace(error == null ? null : safeText(stackTrace(error), 200000));
-            row.setCreatedAt(OffsetDateTime.now());
-            dependencyScanLogRepository.save(row);
-        } catch (Exception ignored) {
-            // не ломаем rebuild из-за проблем с логированием
-        }
-
-        if ("ERROR".equals(level)) {
-            log.error("[DEP-SCAN:{}] {} | path={}", phase, message, sourcePath, error);
-        } else if ("WARN".equals(level)) {
-            log.warn("[DEP-SCAN:{}] {} | path={}", phase, message, sourcePath);
-        } else {
-            log.info("[DEP-SCAN:{}] {} | path={}", phase, message, sourcePath);
-        }
-    }
-
-    private String stackTrace(Throwable error) {
-        StringWriter sw = new StringWriter();
-        PrintWriter pw = new PrintWriter(sw);
-        error.printStackTrace(pw);
-        pw.flush();
-        return sw.toString();
-    }
-
-    private String trimToNull(String s) {
-        if (s == null) {
-            return null;
-        }
-        String x = s.trim();
-        return x.isEmpty() ? null : x;
-    }
-
-    private String safeText(String s, int maxLen) {
-        if (s == null) {
-            return null;
-        }
-        return s.length() <= maxLen ? s : s.substring(0, maxLen);
-    }
 }

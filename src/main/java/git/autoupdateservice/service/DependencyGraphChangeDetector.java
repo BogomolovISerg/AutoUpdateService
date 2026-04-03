@@ -83,7 +83,7 @@ public class DependencyGraphChangeDetector {
             if (path == null || path.isBlank()) {
                 continue;
             }
-            String decodedPath = oneCNameDecoder.decodePathSegment(path);
+            String decodedPath = oneCNameDecoder.decodePath(path);
             String[] parts = decodedPath.split("/");
             if (parts.length < 2) {
                 continue;
