@@ -43,6 +43,9 @@ public class UpdateTask {
     @Column(name = "commit_sha", length = 80)
     private String commitSha;
 
+    @Column(name = "before_sha", length = 80)
+    private String beforeSha;
+
     @Column(name = "author_name", length = 200)
     private String authorName;
 

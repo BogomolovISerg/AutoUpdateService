@@ -29,6 +29,7 @@ public class QueueService {
     public Optional<UpdateTask> enqueueFromWebhook(
             String projectPath,
             String branch,
+            String beforeSha,
             String commitSha,
             String authorName,
             String authorLogin,
@@ -58,6 +59,7 @@ public class QueueService {
         t.setRepoPath(binding.getRepoPath());
         t.setProjectPath(projectPath);
         t.setBranch(branch);
+        t.setBeforeSha(beforeSha);
         t.setCommitSha(commitSha);
         t.setAuthorName(authorName);
         t.setAuthorLogin(authorLogin);
@@ -76,7 +78,7 @@ public class QueueService {
                     LogType.TASK_ENQUEUED,
                     "Task enqueued: " + binding.getTargetType() +
                             (binding.getExtensionName() != null ? " (" + binding.getExtensionName() + ")" : ""),
-                    "{\"taskId\":\"" + saved.getId() + "\",\"projectPath\":\"" + esc(projectPath) + "\",\"scheduledFor\":\"" + scheduledFor + "\"}",
+                    "{\"taskId\":\"" + saved.getId() + "\",\"projectPath\":\"" + esc(projectPath) + "\",\"beforeSha\":\"" + esc(beforeSha) + "\",\"commitSha\":\"" + esc(commitSha) + "\",\"scheduledFor\":\"" + scheduledFor + "\"}",
                     clientIp, "gitlab", null
             );
 

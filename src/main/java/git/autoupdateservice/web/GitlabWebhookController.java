@@ -78,6 +78,7 @@ public class GitlabWebhookController {
         String ref = (String) body.get("ref");
         String branch = parseBranch(ref);
 
+        String beforeSha = (String) body.get("before");
         String commitSha = (String) body.get("after");
 
         // кто сделал push (может отличаться от автора коммита)
@@ -117,6 +118,7 @@ public class GitlabWebhookController {
         var enqueued = queueService.enqueueFromWebhook(
                 projectPath,
                 branch,
+                beforeSha,
                 commitSha,
                 authorName,
                 authorLogin,
@@ -130,6 +132,7 @@ public class GitlabWebhookController {
                 "enqueued", enqueued.isPresent(),
                 "projectPath", projectPath,
                 "branch", branch,
+                "before", beforeSha,
                 "after", commitSha,
                 "commitAuthor", authorName,
                 "pusher", (pusherLogin != null ? pusherLogin : pusherName)
