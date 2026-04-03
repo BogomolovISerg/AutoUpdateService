@@ -15,4 +15,5 @@ public interface DependencySnapshotRepository extends JpaRepository<DependencySn
     );
 
     Optional<DependencySnapshot> findTopBySourceRootOrderByStartedAtDesc(CodeSourceRoot sourceRoot);
+    Optional<DependencySnapshot> findTopByStatusOrderByFinishedAtDesc(DependencySnapshotStatus status);
 }

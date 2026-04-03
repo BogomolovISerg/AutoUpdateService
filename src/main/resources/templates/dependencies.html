@@ -62,7 +62,9 @@
             <p>Начало: <b th:text="${snapshot.startedAt}">-</b></p>
             <p>Окончание: <b th:text="${snapshot.finishedAt} ?: '—'">-</b></p>
             <p>Файлов просканировано: <b th:text="${snapshot.filesScanned}">0</b></p>
-            <p th:if="${snapshot.notes != null and !#strings.isEmpty(snapshot.notes)}">Примечание: <b th:text="${snapshot.notes}">-</b></p>
+            <p th:if="${snapshot.notes != null and !#strings.isEmpty(snapshot.notes)}">
+                Примечание: <b th:text="${snapshot.notes}">-</b>
+            </p>
         </div>
 
         <div class="card" th:if="${graphState != null}" style="margin-top:12px;">
@@ -71,7 +73,9 @@
             <p>Последнее изменение от Git: <b th:text="${graphState.lastGitChangeAt} ?: '—'">—</b></p>
             <p>Последний rebuild: <b th:text="${graphState.lastRebuildAt} ?: '—'">—</b></p>
             <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphState.staleSince}">—</b></p>
-            <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">Причина: <b th:text="${graphState.staleReason}">—</b></p>
+            <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">
+                Причина: <b th:text="${graphState.staleReason}">—</b>
+            </p>
         </div>
 
         <div class="card" th:if="${dirtyItems != null and !#lists.isEmpty(dirtyItems)}" style="margin-top:12px;">
@@ -98,46 +102,40 @@
                     </tbody>
                 </table>
             </div>
-            <div class="card" style="margin-top:12px;">
-                <h3>Журнал сканирования</h3>
-                <div class="table-wrap">
-                    <table class="table">
-                        <thead>
-                        <tr>
-                            <th>Время</th>
-                            <th>Уровень</th>
-                            <th>Этап</th>
-                            <th>Путь</th>
-                            <th>Сообщение</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        <tr th:if="${#lists.isEmpty(scanLogs)}">
-                            <td colspan="5" class="small">Записей нет</td>
-                        </tr>
-                        <tr th:each="r : ${scanLogs}">
-                            <td th:text="${r.createdAt}">2026-03-31 10:00</td>
-                            <td th:text="${r.level}">INFO</td>
-                            <td th:text="${r.phase}">READ_FILE_OK</td>
-                            <td class="wrap" th:text="${r.sourcePath}">CommonModules/...</td>
-                            <td class="wrap" th:text="${r.message}">Сообщение</td>
-                        </tr>
-                        </tbody>
-                    </table>
-                </div>
+        </div>
+
+        <div class="card" style="margin-top:12px;">
+            <h3>Журнал сканирования</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Уровень</th>
+                        <th>Этап</th>
+                        <th>Путь</th>
+                        <th>Сообщение</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:if="${#lists.isEmpty(scanLogs)}">
+                        <td colspan="5" class="small">Записей нет</td>
+                    </tr>
+                    <tr th:each="r : ${scanLogs}">
+                        <td th:text="${r.createdAt}">2026-03-31 10:00</td>
+                        <td th:text="${r.level}">INFO</td>
+                        <td th:text="${r.phase}">READ_FILE_OK</td>
+                        <td class="wrap" th:text="${r.sourcePath} ?: '—'">CommonModules/...</td>
+                        <td class="wrap" th:text="${r.message}">Сообщение</td>
+                    </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
         <form method="get" action="/dependencies" class="row" style="margin-top:12px;">
             <div>
-                <label class="small">Режим</label>
-                <select class="input" name="mode">
-                    <option value="module" th:selected="${mode == 'module'}">По общему модулю</option>
-                    <option value="object" th:selected="${mode == 'object'}">По объекту</option>
-                </select>
-            </div>
-            <div>
-                <label class="small">Поиск</label>
+                <label class="small">Общий модуль</label>
                 <input class="input" type="text" name="q" th:value="${q}"/>
             </div>
             <div>
@@ -161,26 +159,18 @@
                 <thead>
                 <tr>
                     <th>Общий модуль</th>
-                    <th>Процедура / функция</th>
                     <th>Тип объекта</th>
                     <th>Объект</th>
-                    <th>Экспортный модуль</th>
-                    <th>Экспортная процедура</th>
-                    <th>Путь</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr th:if="${#lists.isEmpty(rows)}">
-                    <td colspan="7" class="small">Данных нет</td>
+                    <td colspan="3" class="small">Данных нет</td>
                 </tr>
                 <tr th:each="r : ${rows}">
                     <td th:text="${r.commonModuleName}">ОбщийМодуль</td>
-                    <td th:text="${r.commonModuleMemberName} ?: '—'">Процедура</td>
                     <td th:text="${r.objectType}">DOCUMENT</td>
                     <td th:text="${r.objectName}">ЗаказПокупателя</td>
-                    <td th:text="${r.viaModule} ?: '—'">—</td>
-                    <td th:text="${r.viaMember} ?: '—'">—</td>
-                    <td class="wrap" th:text="${r.sourcePath}">Documents/...</td>
                 </tr>
                 </tbody>
             </table>

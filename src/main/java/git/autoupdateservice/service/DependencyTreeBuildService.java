@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 //import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
@@ -62,6 +63,7 @@ public class DependencyTreeBuildService {
     private final DependencyCallExclusionRepository dependencyCallExclusionRepository;
     private final BslDependencyParser bslDependencyParser;
     private final OneCNameDecoder oneCNameDecoder;
+    private final DependencyTreeSearchService dependencyTreeSearchService;
     private static final int IMPACT_BATCH_SIZE = 1000;
     private static final int EDGE_BATCH_SIZE = 1000;
     private static final long MAX_BSL_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
@@ -92,8 +94,8 @@ public class DependencyTreeBuildService {
         //        sourceRoot.getId(), sourceRoot.getSourceName(), sourceRoot.getRootPath());
 
         try {
-            dependencyEdgeRepository.deleteBySnapshot(snapshot);
-            commonModuleImpactRepository.deleteBySnapshot(snapshot);
+            //dependencyEdgeRepository.deleteBySnapshot(snapshot);
+            //commonModuleImpactRepository.deleteBySnapshot(snapshot);
 
             BuildArtifacts artifacts = scanSource(sourceRoot, snapshot);
 
@@ -114,7 +116,8 @@ public class DependencyTreeBuildService {
 
            // log.error("[DEP-SCAN:REBUILD_FAILED] Dependency rebuild failed: {} | path={}",
                 //    errorMessage(e), sourceRoot.getRootPath(), e);
-
+            dependencyEdgeRepository.deleteBySnapshot(snapshot);
+            commonModuleImpactRepository.deleteBySnapshot(snapshot);
             return snapshot;
         }
     }
@@ -238,11 +241,7 @@ public class DependencyTreeBuildService {
                         edgeBatch.clear();
                     }
                 }
-                if (!edgeBatch.isEmpty()) {
-                    dependencyEdgeRepository.saveAll(edgeBatch);
-                    edgesSaved += edgeBatch.size();
-                    edgeBatch.clear();
-                }
+
                 filesProcessed++;
                 snapshot.setFilesScanned(filesProcessed);
             } catch (Exception e) {
@@ -256,6 +255,11 @@ public class DependencyTreeBuildService {
                 logSkippedFile(file, rel, decodedRel, e, "COMMON_MODULE_SKIPPED");
             }
         }
+        if (!edgeBatch.isEmpty()) {
+            dependencyEdgeRepository.saveAll(edgeBatch);
+            edgesSaved += edgeBatch.size();
+            edgeBatch.clear();
+        }
 
         Map<String, Set<String>> exportToReachableMembers =
                 buildExportReachability(membersByFullName, exportMembersByModule, forwardEdges);
@@ -265,9 +269,10 @@ public class DependencyTreeBuildService {
        // log.info("[DEP-SCAN:OBJECT_FILES] count={}", objectFiles.size());
 
         //Set<ImpactKey> impactDedup = new LinkedHashSet<>();
+        Set<ImpactKey> impactDedup = new LinkedHashSet<>();
 
         for (Path file : objectFiles) {
-            Set<ImpactKey> impactDedup = new LinkedHashSet<>();
+
             String rel = null;
             String decodedRel = null;
 
@@ -303,12 +308,8 @@ public class DependencyTreeBuildService {
 
                         ImpactKey impactKey = new ImpactKey(
                                 affected.moduleName(),
-                                affected.memberName(),
                                 parsed.getObjectType(),
-                                parsed.getObjectName(),
-                                usage.getExportModule(),
-                                usage.getExportMember(),
-                                parsed.getSourcePath()
+                                parsed.getObjectName()
                         );
 
                         if (!impactDedup.add(impactKey)) {
@@ -318,12 +319,12 @@ public class DependencyTreeBuildService {
                         CommonModuleImpact impact = new CommonModuleImpact();
                         impact.setSnapshot(snapshot);
                         impact.setCommonModuleName(affected.moduleName());
-                        impact.setCommonModuleMemberName(affected.memberName());
+                        impact.setCommonModuleMemberName(null);
                         impact.setObjectType(parsed.getObjectType());
                         impact.setObjectName(parsed.getObjectName());
-                        impact.setSourcePath(parsed.getSourcePath());
-                        impact.setViaModule(usage.getExportModule());
-                        impact.setViaMember(usage.getExportMember());
+                        impact.setSourcePath(null);
+                        impact.setViaModule(null);
+                        impact.setViaMember(null);
                         impact.setCreatedAt(OffsetDateTime.now());
                         //impacts.add(impact);
                         impactBatch.add(impact);
@@ -637,12 +638,28 @@ public class DependencyTreeBuildService {
     }
     private record ImpactKey(
             String commonModuleName,
-            String commonModuleMemberName,
             DependencyCallerType objectType,
-            String objectName,
-            String viaModule,
-            String viaMember,
-            String sourcePath
-    ) {
+            String objectName
+    ) { }
+
+    @Transactional(readOnly = true)
+    public List<?> findRows(String mode, String q, DependencyCallerType objectType) {
+        if (isBlank(q)) {
+            return List.of();
+        }
+
+        String moduleName = q.trim();
+
+        // Основной сценарий: ищем по общему модулю -> получаем объекты
+        List<DependencyTreeSearchService.AffectedObject> affectedObjects = dependencyTreeSearchService.findAffectedObjectsByCommonModule(moduleName);
+
+        if (objectType != null) {
+            affectedObjects = affectedObjects.stream()
+                    .filter(x -> x.getObjectType() == objectType)
+                    .toList();
+        }
+
+        // Для остальных режимов возвращаем просто список объектов
+        return affectedObjects;
     }
 }

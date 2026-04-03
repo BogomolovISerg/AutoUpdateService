@@ -33,7 +33,7 @@ public class DependenciesController {
             @RequestParam(required = false) DependencyCallerType objectType,
             Model model
     ) {
-        var snapshot = dependencyTreeSearchService.latestSnapshot().orElse(null);
+        var snapshot = dependencyTreeSearchService.getLatestReadySnapshot().orElse(null);
         model.addAttribute("snapshot", snapshot);
         model.addAttribute("scanLogs",
                 snapshot == null
