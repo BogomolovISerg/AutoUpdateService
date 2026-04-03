@@ -264,7 +264,6 @@ public class DependencyTreeBuildService {
         logExportIndex(exportMembersByModule);
        // log.info("[DEP-SCAN:OBJECT_FILES] count={}", objectFiles.size());
 
-        //Set<ImpactKey> impactDedup = new LinkedHashSet<>();
         Set<ImpactKey> impactDedup = new LinkedHashSet<>();
 
         for (Path file : objectFiles) {
@@ -304,6 +303,7 @@ public class DependencyTreeBuildService {
 
                         ImpactKey impactKey = new ImpactKey(
                                 affected.moduleName(),
+                                affected.memberName(),
                                 parsed.getObjectType(),
                                 parsed.getObjectName()
                         );
@@ -315,14 +315,13 @@ public class DependencyTreeBuildService {
                         CommonModuleImpact impact = new CommonModuleImpact();
                         impact.setSnapshot(snapshot);
                         impact.setCommonModuleName(affected.moduleName());
-                        impact.setCommonModuleMemberName(null);
+                        impact.setCommonModuleMemberName(affected.memberName());
                         impact.setObjectType(parsed.getObjectType());
                         impact.setObjectName(parsed.getObjectName());
                         impact.setSourcePath(null);
                         impact.setViaModule(null);
                         impact.setViaMember(null);
                         impact.setCreatedAt(OffsetDateTime.now());
-                        //impacts.add(impact);
                         impactBatch.add(impact);
 
                         if (impactBatch.size() >= IMPACT_BATCH_SIZE) {
@@ -638,9 +637,11 @@ public class DependencyTreeBuildService {
     }
     private record ImpactKey(
             String commonModuleName,
+            String commonModuleMemberName,
             DependencyCallerType objectType,
             String objectName
-    ) { }
+    ) {
+    }
 
     @Transactional(readOnly = true)
     public List<?> findRows(String mode, String q, DependencyCallerType objectType) {

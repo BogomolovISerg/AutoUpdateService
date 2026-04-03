@@ -3,6 +3,7 @@ package git.autoupdateservice.domain;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import git.autoupdateservice.config.GitChangeType;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;

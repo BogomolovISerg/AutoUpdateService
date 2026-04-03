@@ -1,4 +1,4 @@
-package git.autoupdateservice.domain;
+package git.autoupdateservice.config;
 
 public enum GitChangeType {
     ADDED,

@@ -3,10 +3,10 @@ package git.autoupdateservice.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import git.autoupdateservice.config.GitlabApiProperties;
+import git.autoupdateservice.config.GitChangeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import git.autoupdateservice.domain.GitChangeType;
 
 import java.io.IOException;
 import java.net.URI;
@@ -167,7 +167,14 @@ public class GitlabChangesService {
 
     private static String normalizeBaseUrl(String baseUrl) {
         String v = baseUrl.trim();
-        while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+        if (v.startsWith("http://http://")) {
+            v = "http://" + v.substring("http://http://".length());
+        } else if (v.startsWith("https://https://")) {
+            v = "https://" + v.substring("https://https://".length());
+        }
+        while (v.endsWith("/")) {
+            v = v.substring(0, v.length() - 1);
+        }
         return v;
     }
 

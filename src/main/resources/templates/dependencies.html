@@ -5,6 +5,186 @@
     <title>Зависимости</title>
     <link rel="stylesheet" href="/app.css"/>
 </head>
+<script>
+    let treeOffset = 0;
+    let treeLimit = 50;
+
+    function esc(s) {
+        return (s ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;');
+    }
+
+    function currentFilters() {
+        return {
+            q: document.getElementById('q')?.value ?? '',
+            objectType: document.getElementById('objectType')?.value ?? ''
+        };
+    }
+
+    async function loadModules(reset) {
+        const root = document.getElementById('treeRoot');
+        const status = document.getElementById('treeStatus');
+        const f = currentFilters();
+
+        if (reset) {
+            treeOffset = 0;
+            root.innerHTML = '';
+        }
+
+        status.textContent = 'Загрузка модулей...';
+
+        const params = new URLSearchParams();
+        if (f.q) params.set('q', f.q);
+        if (f.objectType) params.set('objectType', f.objectType);
+        params.set('limit', treeLimit);
+        params.set('offset', treeOffset);
+
+        const resp = await fetch('/dependencies/tree/modules?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            status.textContent = 'Ошибка загрузки модулей';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (reset && data.length === 0) {
+            status.textContent = 'Данных нет';
+            return;
+        }
+
+        if (data.length === 0) {
+            status.textContent = 'Больше данных нет';
+            return;
+        }
+
+        for (const item of data) {
+            const moduleId = 'module_' + btoa(unescape(encodeURIComponent(item.commonModuleName))).replaceAll('=', '');
+            const html = `
+                <details class="tree-module" style="margin-bottom:8px; border:1px solid #ddd; border-radius:8px; padding:8px;"
+                         data-module-name="${esc(item.commonModuleName)}"
+                         ontoggle="onModuleToggle(this)">
+                    <summary style="cursor:pointer;">
+                        <b>${esc(item.commonModuleName)}</b>
+                        <span class="small">(${item.methodCount ?? 0} методов, ${item.objectCount ?? 0} объектов)</span>
+                    </summary>
+                    <div id="${moduleId}" class="module-children" style="padding-left:16px; margin-top:8px;"></div>
+                </details>
+            `;
+            root.insertAdjacentHTML('beforeend', html);
+        }
+
+        treeOffset += data.length;
+        status.textContent = 'Загружено модулей: ' + treeOffset;
+    }
+
+    async function onModuleToggle(detailsEl) {
+        if (!detailsEl.open) return;
+
+        const container = detailsEl.querySelector('.module-children');
+        if (container.dataset.loaded === '1') return;
+
+        const moduleName = detailsEl.dataset.moduleName;
+        const f = currentFilters();
+
+        container.innerHTML = '<div class="small">Загрузка методов...</div>';
+
+        const params = new URLSearchParams();
+        params.set('moduleName', moduleName);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            container.innerHTML = '<div class="small">Ошибка загрузки методов</div>';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (data.length === 0) {
+            container.innerHTML = '<div class="small">Методов нет</div>';
+            container.dataset.loaded = '1';
+            return;
+        }
+
+        container.innerHTML = '';
+
+        for (const item of data) {
+            const methodKey = moduleName + '||' + item.methodName;
+            const methodId = 'method_' + btoa(unescape(encodeURIComponent(methodKey))).replaceAll('=', '');
+            const html = `
+                <details class="tree-method" style="margin-bottom:6px;"
+                         data-module-name="${esc(moduleName)}"
+                         data-method-name="${esc(item.methodName)}"
+                         ontoggle="onMethodToggle(this)">
+                    <summary style="cursor:pointer;">
+                        ${esc(item.methodName)}
+                        <span class="small">(${item.objectCount ?? 0} объектов)</span>
+                    </summary>
+                    <div id="${methodId}" class="method-children" style="padding-left:18px; margin-top:6px;"></div>
+                </details>
+            `;
+            container.insertAdjacentHTML('beforeend', html);
+        }
+
+        container.dataset.loaded = '1';
+    }
+
+    async function onMethodToggle(detailsEl) {
+        if (!detailsEl.open) return;
+
+        const container = detailsEl.querySelector('.method-children');
+        if (container.dataset.loaded === '1') return;
+
+        const moduleName = detailsEl.dataset.moduleName;
+        const methodName = detailsEl.dataset.methodName;
+        const f = currentFilters();
+
+        container.innerHTML = '<div class="small">Загрузка объектов...</div>';
+
+        const params = new URLSearchParams();
+        params.set('moduleName', moduleName);
+        params.set('methodName', methodName);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/objects?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            container.innerHTML = '<div class="small">Ошибка загрузки объектов</div>';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (data.length === 0) {
+            container.innerHTML = '<div class="small">Объектов нет</div>';
+            container.dataset.loaded = '1';
+            return;
+        }
+
+        const items = data.map(x => `<li>${esc(x.objectType)}.${esc(x.objectName)}</li>`).join('');
+        container.innerHTML = `<ul style="margin:0; padding-left:18px;">${items}</ul>`;
+        container.dataset.loaded = '1';
+    }
+
+    function loadMoreModules() {
+        loadModules(false);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadModules(true);
+    });
+</script>
 <body>
 <div class="nav">
     <a href="/">Dashboard</a>
@@ -95,9 +275,9 @@
         <div class="card" th:if="${graphState != null}" style="margin-top:12px;">
             <p>Статус графа: <b th:text="${graphState.graphIsStale} ? 'Устарел' : 'Актуален'">Актуален</b></p>
             <p>Активный snapshot: <b th:text="${graphState.activeSnapshot != null ? graphState.activeSnapshot.id : '—'}">—</b></p>
-            <p>Последнее изменение от Git: <b th:text="${graphState.lastGitChangeAt} ?: '—'">—</b></p>
+            <p>Последнее изменение от Git: <b th:text="${graphLastGitChangeAtFmt} ?: '—'">—</b></p>
             <p>Последний rebuild: <b th:text="${graphLastRebuildAtFmt} ?: '—'">—</b></p>
-            <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphState.staleSince}">—</b></p>
+            <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphStaleSinceFmt} ?: '—'">—</b></p>
             <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">
                 Причина: <b th:text="${graphState.staleReason}">—</b>
             </p>
@@ -158,48 +338,34 @@
             </div>
         </div>
 
-        <form method="get" th:action="@{/dependencies}" class="row" style="margin-top:12px;">
-            <input type="hidden" name="mode" th:value="${mode != null ? mode : 'module'}"/>
+        <form id="treeSearchForm" method="get" th:action="@{/dependencies}" class="row" style="margin-top:12px;">
             <div>
                 <label class="small">Общий модуль</label>
-                <input class="input" type="text" name="q" th:value="${q}"/>
+                <input class="input" type="text" id="q" name="q" th:value="${q}"/>
             </div>
+
             <div>
                 <label class="small">Тип объекта</label>
-                <select class="input" name="objectType">
-                    <option value="" th:selected="${objectType == null}">Все</option>
-                    <option value="CATALOG" th:selected="${objectType != null and objectType.name() == 'CATALOG'}">Справочник</option>
-                    <option value="DOCUMENT" th:selected="${objectType != null and objectType.name() == 'DOCUMENT'}">Документ</option>
-                    <option value="REPORT" th:selected="${objectType != null and objectType.name() == 'REPORT'}">Отчёт</option>
-                    <option value="COMMON_FORM" th:selected="${objectType != null and objectType.name() == 'COMMON_FORM'}">Общая форма</option>
-                    <option value="DATA_PROCESSOR" th:selected="${objectType != null and objectType.name() == 'DATA_PROCESSOR'}">Обработка</option>
+                <select class="input" id="objectType" name="objectType">
+                    <option value="">Все</option>
+                    <option th:each="t : ${objectTypes}"
+                            th:value="${t.name()}"
+                            th:text="${t.name()}"
+                            th:selected="${objectType != null and objectType.name() == t.name()}">
+                    </option>
                 </select>
             </div>
-            <div class="row-actions">
-                <button class="btn" type="submit">Найти</button>
+
+            <div style="align-self:end; display:flex; gap:8px;">
+                <button class="btn" type="button" onclick="loadModules(true)">Найти</button>
+                <button class="btn" type="button" onclick="loadMoreModules()">Еще</button>
             </div>
         </form>
 
-        <div class="table-wrap" style="margin-top:12px;">
-            <table class="table">
-                <thead>
-                <tr>
-                    <th>Общий модуль</th>
-                    <th>Тип объекта</th>
-                    <th>Объект</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr th:if="${#lists.isEmpty(rows)}">
-                    <td colspan="3" class="small">Данных нет</td>
-                </tr>
-                <tr th:each="r : ${rows}">
-                    <td th:text="${r.commonModuleName}">ОбщийМодуль</td>
-                    <td th:text="${r.objectType}">DOCUMENT</td>
-                    <td th:text="${r.objectName}">ЗаказПокупателя</td>
-                </tr>
-                </tbody>
-            </table>
+        <div style="margin-top:12px;">
+            <h3>Связи</h3>
+            <div id="treeStatus" class="small" style="margin-bottom:8px;">Загрузка не выполнялась</div>
+            <div id="treeRoot"></div>
         </div>
     </div>
 </div>

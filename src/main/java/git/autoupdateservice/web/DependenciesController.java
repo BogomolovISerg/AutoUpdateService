@@ -47,7 +47,7 @@ public class DependenciesController {
             @RequestParam(required = false) DependencyCallerType objectType,
             Model model
     ) {
-        var snapshot = dependencyTreeSearchService.getLatestReadySnapshot().orElse(null);
+        var snapshot = dependencyTreeSearchService.latestSnapshot().orElse(null);
         var graphState = dependencyGraphStateService.getState();
 
         ZoneId zone;
@@ -91,14 +91,10 @@ public class DependenciesController {
                 parseSnapshotNotes(snapshot == null ? null : snapshot.getNotes()));
 
         model.addAttribute("snapshot", snapshot);
-        model.addAttribute("scanLogs",
-                snapshot == null
-                        ? java.util.List.of()
-                        : dependencyScanLogRepository.findTop200BySnapshotOrderByCreatedAtDesc(snapshot));
         model.addAttribute("mode", mode);
         model.addAttribute("q", q);
         model.addAttribute("objectType", objectType);
-        model.addAttribute("rows", dependencyTreeSearchService.findRows(mode, q, objectType));
+        model.addAttribute("objectTypes", DependencyCallerType.values());
         model.addAttribute("baseSource", codeSourceRootRepository.findFirstBySourceKindOrderByUpdatedAtDesc(SourceKind.BASE).orElse(null));
         model.addAttribute("graphState", dependencyGraphStateService.getState());
         model.addAttribute("dirtyItems", dependencyGraphStateService.latestDirtyItems());
@@ -138,6 +134,37 @@ public class DependenciesController {
         ra.addFlashAttribute("message", "Источник основной конфигурации сохранён");
         return "redirect:/dependencies";
     }
+
+    @GetMapping("/dependencies/tree/modules")
+    @ResponseBody
+    public List<DependencyTreeSearchService.ModuleNode> treeModules(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) DependencyCallerType objectType,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset
+    ) {
+        return dependencyTreeSearchService.findModules(q, objectType, limit, offset);
+    }
+
+    @GetMapping("/dependencies/tree/methods")
+    @ResponseBody
+    public List<DependencyTreeSearchService.MethodNode> treeMethods(
+            @RequestParam String moduleName,
+            @RequestParam(required = false) DependencyCallerType objectType
+    ) {
+        return dependencyTreeSearchService.findMethods(moduleName, objectType);
+    }
+
+    @GetMapping("/dependencies/tree/objects")
+    @ResponseBody
+    public List<DependencyTreeSearchService.ObjectNode> treeObjects(
+            @RequestParam String moduleName,
+            @RequestParam String methodName,
+            @RequestParam(required = false) DependencyCallerType objectType
+    ) {
+        return dependencyTreeSearchService.findObjects(moduleName, methodName, objectType);
+    }
+
     @lombok.Value
     @lombok.Builder
     public static class SnapshotNoteRow {
