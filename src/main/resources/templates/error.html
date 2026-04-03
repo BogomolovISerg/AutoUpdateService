@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Ошибка</title>
+    <link rel="stylesheet" href="/app.css"/>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h2>Ошибка</h2>
+        <p th:text="${message}">Что-то пошло не так</p>
+        <a class="btn" href="/">На главную</a>
+    </div>
+</div>
+</body>
+</html>

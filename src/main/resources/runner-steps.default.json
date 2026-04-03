@@ -1,0 +1,189 @@
+[
+  {
+    "order": 10,
+    "code": "SCHEDULED_LOCK",
+    "title": "Блокировка регламентных заданий",
+    "command": [
+      "{{binary}}",
+      "scheduledjobs lock",
+      "--ras {{ras-address}}",
+      "--rac {{rac-path}}",
+      "--db {{base-name}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connection}}",
+      "--nocacheuse",
+      "--debuglogfile {{log-dir}}/01_scheduled_lock.debug.log"
+    ]
+  },
+  {
+    "order": 20,
+    "code": "SESSION_LOCK",
+    "title": "Блокировка новых подключений",
+    "command": [
+      "{{binary}}",
+      "session lock",
+      "--ras {{ras-address}}",
+      "--rac {{rac-path}}",
+      "--db {{base-name}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connection}}",
+      "--lockmessage {{lockMessage}}",
+      "--uccode {{uccode}}",
+      "--debuglogfile {{log-dir}}/02_session_lock.debug.log",
+      "--nocacheuse"
+    ]
+  },
+  {
+    "order": 30,
+    "code": "SESSION_KILL",
+    "title": "Удаление активных сессий",
+    "command": [
+      "{{binary}}",
+      "session kill",
+      "--ras {{ras-address}}",
+      "--rac {{rac-path}}",
+      "--db {{base-name}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connection}}",
+      "--debuglogfile {{log-dir}}/03_session_kill.debug.log",
+      "--nocacheuse"
+    ]
+  },
+  {
+    "order": 40,
+    "code": "SESSION_CLOSED",
+    "title": "Проверка отсутствия сессий",
+    "retry": {
+      "maxAttempts": 0,
+      "sleepSeconds": 0,
+      "checkCommand": [
+        "{{binary}}",
+        "session closed",
+        "--ras {{ras-address}}",
+        "--rac {{rac-path}}",
+        "--db {{base-name}}",
+        "--db-user {{db-user}}",
+        "--db-pwd {{db-password}}",
+        "--ibconnection {{ib-connection}}",
+        "--debuglogfile {{log-dir}}/04_session_closed_{{attempt}}.debug.log",
+        "--nocacheuse"
+      ],
+      "onFailCommand": [
+        "{{binary}}",
+        "session kill",
+        "--ras {{ras-address}}",
+        "--rac {{rac-path}}",
+        "--db {{base-name}}",
+        "--db-user {{db-user}}",
+        "--db-pwd {{db-password}}",
+        "--ibconnection {{ib-connection}}",
+        "--debuglogfile {{log-dir}}/03b_session_kill_retry_{{attempt}}.debug.log",
+        "--nocacheuse"
+      ]
+    }
+  },
+  {
+    "order": 50,
+    "code": "LOADREPO_MAIN",
+    "title": "Получение данных из хранилища (основная конфигурация)",
+    "condition": "needMain",
+    "command": [
+      "{{binary}}",
+      "loadrepo",
+      "--storage-name {{mainRepoPath}}",
+      "--storage-user {{repo-user}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connectionrepo}}",
+      "--uccode {{uccode}}",
+      "--debuglogfile {{log-dir}}/10_loadrepo_main.debug.log"
+    ]
+  },
+  {
+    "order": 60,
+    "code": "UPDATEDB",
+    "title": "Обновление базы (основная конфигурация)",
+    "condition": "needMain",
+    "command": [
+      "{{binary}}",
+      "updatedb",
+      "--ibconnection {{ib-connectionrepo}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--uccode {{uccode}}",
+      "--debuglogfile {{log-dir}}/11_updatedb.debug.log",
+      "--nocacheuse"
+    ]
+  },
+  {
+    "order": 70,
+    "code": "LOADREPO_EXT_{{ext}}",
+    "title": "Получение данных из хранилища (расширение {{ext}})",
+    "foreach": "extensions",
+    "command": [
+      "{{binary}}",
+      "loadrepo",
+      "--storage-name {{extRepoPath}}",
+      "--ibconnection {{ib-connectionrepo}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--storage-user {{repoUser}}",
+      "--uccode {{uccode}}",
+      "--debuglogfile {{log-dir}}/20_loadrepo_ext_{{extFile}}.debug.log",
+      "-extension {{ext}}"
+    ]
+  },
+  {
+    "order": 80,
+    "code": "UPDATEEXT_{{ext}}",
+    "title": "Обновление расширения {{extRepoPath}}",
+    "foreach": "extensions",
+    "command": [
+      "{{binary}}",
+      "updateext {{extRepoPath}}",
+      "--ibconnection {{ib-connectionrepo}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--uccode {{uccode}}",
+      "--debuglogfile {{log-dir}}/21_updateext_{{extFile}}.debug.log"
+    ]
+  },
+  {
+    "order": 90,
+    "code": "SESSION_UNLOCK",
+    "title": "Разблокировка базы",
+    "always": true,
+    "command": [
+      "{{binary}}",
+      "session unlock",
+      "--ras {{ras-address}}",
+      "--rac {{rac-path}}",
+      "--db {{base-name}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connection}}",
+      "--debuglogfile {{log-dir}}/90_session_unlock.debug.log"
+    ]
+  },
+  {
+    "order": 100,
+    "code": "SCHEDULED_UNLOCK",
+    "title": "Разблокировка регламентных заданий",
+    "always": true,
+    "command": [
+      "{{binary}}",
+      "scheduledjobs unlock",
+      "--ras {{ras-address}}",
+      "--rac {{rac-path}}",
+      "--db {{base-name}}",
+      "--db-user {{db-user}}",
+      "--db-pwd {{db-password}}",
+      "--ibconnection {{ib-connection}}",
+      "--nocacheuse",
+      "--debuglogfile {{log-dir}}/91_scheduled_unlock.debug.log"
+    ]
+  }
+]

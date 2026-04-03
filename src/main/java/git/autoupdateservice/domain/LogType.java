@@ -1,0 +1,19 @@
+package git.autoupdateservice.domain;
+
+public enum LogType {
+    WEBHOOK_RECEIVED,
+    TASK_ENQUEUED,
+    UNMAPPED_REPO_EVENT,
+    AUTO_UPDATE_TOGGLED,
+    TASK_STATUS_CHANGED,
+    SETTINGS_CHANGED,
+
+    RUN_STARTED,
+    RUN_FINISHED,
+
+    STEP_STARTED,
+    STEP_FINISHED,
+    STEP_FAILED,
+
+    PASSWORD_CHANGED
+}

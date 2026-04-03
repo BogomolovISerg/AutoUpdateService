@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/app.css"/>
+</head>
+<body>
+<div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/settings">Настройки</a>
+    <a href="/queue">Очередь</a>
+    <a href="/logs">Логи</a>
+    <a href="/account/change-password">Сменить пароль</a>
+    <form class="logout-form" th:action="@{/logout}" method="post">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button class="nav-btn" type="submit">Выход</button>
+    </form>
+</div>
+
+<div class="container">
+    <div class="grid">
+        <div class="card col-6">
+            <h3>Автообновление</h3>
+            <p>Статус: <b th:text="${settings.autoUpdateEnabled} ? 'Включено' : 'Выключено'">Включено</b></p>
+            <p>Следующая дата: <b th:text="${settings.nextRunDate} ?: '-'">-</b></p>
+            <p>Время: <b th:text="${settings.runTime}">02:00</b></p>
+            <p>Новые задачи в очереди: <b th:text="${pendingNewCount}">0</b></p>
+            <a class="btn" href="/settings">Открыть настройки</a>
+        </div>
+        <div class="card col-6">
+            <h3>Последние прогоны</h3>
+            <table class="table  dashboard-table">
+                <thead><tr><th>запланировано</th><th>статус</th><th>ошибка</th></tr></thead>
+                <tbody>
+                <tr th:each="r : ${recentRuns}">
+                    <td th:text="${r.plannedFor}">—</td>
+                    <td th:text="${r.status}">—</td>
+                    <td th:text="${r.errorSummary}">—</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Последние задачи</h3>
+        <table class="table  dashboard-table">
+            <thead>
+            <tr>
+                <th>создано</th><th>проект</th><th>ветка</th><th>расш.</th><th>запланировано</th><th>автор</th><th>комментарий</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="t : ${recentNewTasks}">
+                <td th:text="${t.createdAt}">—</td>
+                <td th:text="${t.projectPath}">—</td>
+                <td th:text="${t.targetType}">—</td>
+                <td th:text="${t.extensionName} ?: '—'">—</td>
+                <td th:text="${t.scheduledFor}">—</td>
+                <td th:text="${#strings.isEmpty(t.authorName) ? ( #strings.isEmpty(t.authorLogin) ? '—' : t.authorLogin ) : t.authorName}" th:title="${t.authorLogin}">—</td>
+                <td class="wrap" th:text="${t.comment}">—</td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="small">Полный список на странице «Очередь».</p>
+    </div>
+</div>
+</body>
+</html>

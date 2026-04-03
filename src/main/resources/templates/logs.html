@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Логи</title>
+    <link rel="stylesheet" href="/app.css"/>
+</head>
+<body>
+<div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/settings">Настройки</a>
+    <a href="/queue">Очередь</a>
+    <a href="/logs">Логи</a>
+    <a href="/account/change-password">Сменить пароль</a>
+    <form class="logout-form" th:action="@{/logout}" method="post">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button class="nav-btn" type="submit">Выход</button>
+    </form>
+</div>
+
+<div class="container">
+    <div class="card">
+        <h2>Логи</h2>
+
+        <form method="get" action="/logs" class="row">
+            <div>
+                <label class="small">С</label>
+                <input class="input" type="date" name="from" th:value="${from}"/>
+            </div>
+            <div>
+                <label class="small">по</label>
+                <input class="input" type="date" name="to" th:value="${to}"/>
+            </div>
+            <div class="row-actions">
+                <button class="btn" type="submit">Фильтр</button>
+                <a class="btn secondary" href="/logs">Сброс</a>
+            </div>
+        </form>
+
+        <!-- ✅ pager теперь работает с int page + int totalPages -->
+        <div class="pager" th:if="${totalPages > 1}" style="margin-top:12px;">
+            <a class="btn secondary"
+               th:if="${page > 1}"
+               th:href="@{/logs(page=${page - 1}, from=${from}, to=${to})}">← Назад</a>
+
+            <span class="small">
+        Стр. <b th:text="${page}">1</b> из <b th:text="${totalPages}">1</b>
+        · всего <b th:text="${totalElements}">0</b>
+      </span>
+
+            <a class="btn secondary"
+               th:if="${page < totalPages}"
+               th:href="@{/logs(page=${page + 1}, from=${from}, to=${to})}">Вперёд →</a>
+        </div>
+    </div>
+
+    <div class="card" th:each="entry : ${grouped}">
+        <!-- ✅ Если добавил model.addAttribute("noDate", NO_DATE), то покажем "Без даты" -->
+        <h3 th:text="${noDate != null and entry.key.equals(noDate)} ? 'Без даты' : entry.key">2026-02-24</h3>
+
+        <div class="table-wrap">
+            <table class="table logs-table">
+                <thead>
+                <tr>
+                    <th>ts</th><th>type</th><th>level</th><th>actor</th><th>ip</th><th>message</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="e : ${entry.value}">
+                    <td th:text="${tsFmt[e.id]}">—</td>
+                    <td th:text="${e.type}">—</td>
+                    <td th:text="${e.level}">—</td>
+                    <td th:text="${e.actor} ?: '—'">—</td>
+                    <td th:text="${e.clientIp} ?: '—'">—</td>
+                    <td class="wrap">
+                        <div th:text="${e.message}">—</div>
+                        <div class="small" th:if="${withDetails.contains(e.id)}">
+                            <a th:href="@{/logs/view(id=${e.id})}">подробнее</a>
+                        </div>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+</body>
+</html>

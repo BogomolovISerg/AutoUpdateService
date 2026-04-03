@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8"/>
+    <title>Настройки</title>
+    <link rel="stylesheet" href="/app.css"/>
+</head>
+<body>
+<div class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/settings">Настройки</a>
+    <a href="/queue">Очередь</a>
+    <a href="/logs">Логи</a>
+    <a href="/account/change-password">Сменить пароль</a>
+    <form class="logout-form" th:action="@{/logout}" method="post">
+        <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+        <button class="nav-btn" type="submit">Выход</button>
+    </form>
+</div>
+
+<div class="container">
+    <div class="card">
+        <h2>Настройки</h2>
+        <p class="small">Если выключить автообновление при наличии новых задач появится подтверждение.</p>
+        <form method="post" th:action="@{/settings}" th:object="${form}">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+
+            <div class="grid settings-grid">
+                <div class="col-12">
+                    <label><input type="checkbox" th:field="*{autoUpdateEnabled}"/> Автообновление включено</label>
+                    <p class="small">Новых задач в очереди сейчас: <b th:text="${pendingNewCount}">0</b></p>
+                </div>
+
+                <div class="col-12">
+                    <label>Сообщение блокировки</label>
+                    <input class="input" type="text" th:field="*{lockMessage}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Дата ближайшего запуска (ночь)</label>
+                    <input class="input" type="date" th:field="*{nextRunDate}"/>
+                </div>
+                <div class="col-6">
+                    <label>Код блокировки</label>
+                    <input class="input" type="text" th:field="*{uccode}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Время запуска</label>
+                    <input class="input" type="time" th:field="*{runTime}"/>
+                </div>
+                <div class="col-6">
+                    <label>Количество попыток</label>
+                    <input class="input" type="number" min="1" th:field="*{closedMaxAttempts}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Часовой пояс</label>
+                    <input class="input" type="text" th:field="*{timezone}"/>
+                </div>
+                <div class="col-6">
+                    <label>Ожидание между попытками, сек</label>
+                    <input class="input" type="number" min="1" th:field="*{closedSleepSeconds}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Очередь: строк на странице</label>
+                    <input class="input" type="number" min="10" max="500" th:field="*{queuePageSize}"/>
+                    <div class="small">По умолчанию 50</div>
+                </div>
+                <div class="col-6">
+                    <label>Логи: строк на странице</label>
+                    <input class="input" type="number" min="10" max="500" th:field="*{logsPageSize}"/>
+                    <div class="small">По умолчанию 50</div>
+                </div>
+            </div>
+
+            <div class="row-actions" style="margin-top:12px; margin-left:0;">
+                <button class="btn" type="submit">Сохранить</button>
+                <a class="btn secondary" href="/">Назад</a>
+            </div>
+        </form>
+    </div>
+</div>
+</body>
+</html>
