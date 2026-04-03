@@ -1,19 +1,7 @@
 package git.autoupdateservice.service;
 
-import git.autoupdateservice.domain.CodeSourceRoot;
-import git.autoupdateservice.domain.CommonModuleImpact;
-import git.autoupdateservice.domain.DependencyBuildMode;
-import git.autoupdateservice.domain.DependencyCallExclusion;
-import git.autoupdateservice.domain.DependencyCallerType;
-import git.autoupdateservice.domain.DependencyEdge;
-import git.autoupdateservice.domain.DependencySnapshot;
-import git.autoupdateservice.domain.DependencySnapshotStatus;
-import git.autoupdateservice.domain.SourceKind;
-import git.autoupdateservice.repo.CodeSourceRootRepository;
-import git.autoupdateservice.repo.CommonModuleImpactRepository;
-import git.autoupdateservice.repo.DependencyCallExclusionRepository;
-import git.autoupdateservice.repo.DependencyEdgeRepository;
-import git.autoupdateservice.repo.DependencySnapshotRepository;
+import git.autoupdateservice.domain.*;
+import git.autoupdateservice.repo.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +52,7 @@ public class DependencyTreeBuildService {
     private final BslDependencyParser bslDependencyParser;
     private final OneCNameDecoder oneCNameDecoder;
     private final DependencyTreeSearchService dependencyTreeSearchService;
+    private final DependencyScanLogRepository dependencyScanLogRepository;
     private static final int IMPACT_BATCH_SIZE = 1000;
     private static final int EDGE_BATCH_SIZE = 1000;
     private static final long MAX_BSL_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
@@ -104,9 +93,15 @@ public class DependencyTreeBuildService {
             snapshot.setFinishedAt(OffsetDateTime.now());
             snapshot.setNotes(buildFinishNotes(artifacts));
             snapshot = dependencySnapshotRepository.save(snapshot);
-
+            saveScanLog(snapshot, "INFO", "START", sourceRoot.getRootPath(),
+                    "Запущено полное сканирование", null);
             dependencyGraphStateService.markSnapshotReady(snapshot);
-
+            saveScanLog(snapshot, "INFO", "FINISH", sourceRoot.getRootPath(),
+                    "Полное сканирование завершено. Обработано=" + artifacts.filesScanned()
+                            + ", пропущено=" + artifacts.skippedFiles()
+                            + ", edges=" + artifacts.edgesSaved()
+                            + ", impacts=" + artifacts.impactsSaved(),
+                    null);
             return snapshot;
         } catch (Exception e) {
             snapshot.setStatus(DependencySnapshotStatus.FAILED);
@@ -252,6 +247,7 @@ public class DependencyTreeBuildService {
                         + " | error=" + errorMessage(e);
 
                 skippedFileMessages.add(msg);
+                saveScanLog(snapshot, "WARN", "COMMON_MODULE_SKIPPED", decodedRel, msg, e);
                 logSkippedFile(file, rel, decodedRel, e, "COMMON_MODULE_SKIPPED");
             }
         }
@@ -347,6 +343,7 @@ public class DependencyTreeBuildService {
                         + " | error=" + errorMessage(e);
 
                 skippedFileMessages.add(msg);
+                saveScanLog(snapshot, "WARN", "OBJECT_FILE_SKIPPED", decodedRel, msg, e);
               //  log.warn("[DEP-SCAN:OBJECT_FILE_SKIPPED] {}", msg);
             }
         }
@@ -489,7 +486,10 @@ public class DependencyTreeBuildService {
             return base;
         }
 
-        List<String> preview = artifacts.skippedFileMessages().stream().limit(3).toList();
+        List<String> preview = artifacts.skippedFileMessages().stream()
+                .limit(50)
+                .toList();
+
         return base + ". Первые ошибки: " + String.join(" ; ", preview);
     }
 
@@ -662,4 +662,28 @@ public class DependencyTreeBuildService {
         // Для остальных режимов возвращаем просто список объектов
         return affectedObjects;
     }
+    private void saveScanLog(
+            DependencySnapshot snapshot,
+            String level,
+            String phase,
+            String sourcePath,
+            String message,
+            Throwable error
+    ) {
+        if (snapshot == null) {
+            return;
+        }
+
+        DependencyScanLog row = new DependencyScanLog();
+        row.setSnapshot(snapshot);
+        row.setLevel(level);
+        row.setPhase(phase);
+        row.setSourcePath(sourcePath);
+        row.setMessage(message);
+        row.setStacktrace(error == null ? null : errorMessage(error));
+        row.setCreatedAt(OffsetDateTime.now());
+
+        dependencyScanLogRepository.save(row);
+    }
+
 }

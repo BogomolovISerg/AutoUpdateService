@@ -26,7 +26,7 @@
         <p class="small" th:if="${message != null}" th:text="${message}">Готово</p>
         <p class="small" th:if="${error != null}" th:text="${error}">Ошибка</p>
 
-        <form method="post" action="/dependencies/source/save" class="row">
+        <form method="post" th:action="@{/dependencies/source/save}" class="row">
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
             <div>
                 <label class="small">Имя источника</label>
@@ -51,7 +51,7 @@
             </div>
         </form>
 
-        <form method="post" action="/dependencies/rebuild" style="margin-top:12px;">
+        <form method="post" th:action="@{/dependencies/rebuild}" style="margin-top:12px;">
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
             <button class="btn secondary" type="submit">Полное сканирование</button>
         </form>
@@ -59,19 +59,44 @@
         <div class="card" th:if="${snapshot != null}" style="margin-top:12px;">
             <p>Статус: <b th:text="${snapshot.status}">READY</b></p>
             <p>Режим: <b th:text="${snapshot.buildMode}">FULL</b></p>
-            <p>Начало: <b th:text="${snapshot.startedAt}">-</b></p>
-            <p>Окончание: <b th:text="${snapshot.finishedAt} ?: '—'">-</b></p>
+            <p>Начало: <b th:text="${snapshotStartedAtFmt} ?: '—'">-</b></p>
+            <p>Окончание: <b th:text="${snapshotFinishedAtFmt} ?: '—'">-</b></p>
             <p>Файлов просканировано: <b th:text="${snapshot.filesScanned}">0</b></p>
-            <p th:if="${snapshot.notes != null and !#strings.isEmpty(snapshot.notes)}">
-                Примечание: <b th:text="${snapshot.notes}">-</b>
-            </p>
+        </div>
+        <div th:if="${snapshotNoteSummary != null}" style="margin-top:12px;">
+            <p>Примечание: <b th:text="${snapshotNoteSummary}">-</b></p>
+        </div>
+
+        <div class="table-wrap"
+             th:if="${snapshotNoteRows != null and !#lists.isEmpty(snapshotNoteRows)}"
+             style="margin-top:12px; max-height:320px; overflow:auto; border:1px solid #ddd; border-radius:8px;">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Тип</th>
+                    <th>Файл</th>
+                    <th>rel</th>
+                    <th>decodedRel</th>
+                    <th>Ошибка</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="r : ${snapshotNoteRows}">
+                    <td th:text="${r.kind}">общий модуль</td>
+                    <td class="wrap" th:text="${r.file}">file</td>
+                    <td class="wrap" th:text="${r.rel}">rel</td>
+                    <td class="wrap" th:text="${r.decodedRel}">decodedRel</td>
+                    <td class="wrap" th:text="${r.error}">error</td>
+                </tr>
+                </tbody>
+            </table>
         </div>
 
         <div class="card" th:if="${graphState != null}" style="margin-top:12px;">
             <p>Статус графа: <b th:text="${graphState.graphIsStale} ? 'Устарел' : 'Актуален'">Актуален</b></p>
             <p>Активный snapshot: <b th:text="${graphState.activeSnapshot != null ? graphState.activeSnapshot.id : '—'}">—</b></p>
             <p>Последнее изменение от Git: <b th:text="${graphState.lastGitChangeAt} ?: '—'">—</b></p>
-            <p>Последний rebuild: <b th:text="${graphState.lastRebuildAt} ?: '—'">—</b></p>
+            <p>Последний rebuild: <b th:text="${graphLastRebuildAtFmt} ?: '—'">—</b></p>
             <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphState.staleSince}">—</b></p>
             <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">
                 Причина: <b th:text="${graphState.staleReason}">—</b>
@@ -122,7 +147,7 @@
                         <td colspan="5" class="small">Записей нет</td>
                     </tr>
                     <tr th:each="r : ${scanLogs}">
-                        <td th:text="${r.createdAt}">2026-03-31 10:00</td>
+                        <td th:text="${scanLogCreatedAtFmt[T(java.lang.String).valueOf(r.id)]} ?: '—'">01.04.2026 10:00:00</td>
                         <td th:text="${r.level}">INFO</td>
                         <td th:text="${r.phase}">READ_FILE_OK</td>
                         <td class="wrap" th:text="${r.sourcePath} ?: '—'">CommonModules/...</td>
@@ -133,7 +158,8 @@
             </div>
         </div>
 
-        <form method="get" action="/dependencies" class="row" style="margin-top:12px;">
+        <form method="get" th:action="@{/dependencies}" class="row" style="margin-top:12px;">
+            <input type="hidden" name="mode" th:value="${mode != null ? mode : 'module'}"/>
             <div>
                 <label class="small">Общий модуль</label>
                 <input class="input" type="text" name="q" th:value="${q}"/>

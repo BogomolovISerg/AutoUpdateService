@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -38,29 +39,39 @@ public class DependencyTreeSearchService {
 
     @Transactional(readOnly = true)
     public List<DependencyRow> findRows(String mode, String q, DependencyCallerType objectType) {
-        if (isBlank(q)) {
-            return List.of();
-        }
-
-        String commonModuleName = q.trim();
-
-        DependencySnapshot snapshot = getLatestReadySnapshot()
-                .orElse(null);
-
+        DependencySnapshot snapshot = getLatestReadySnapshot().orElse(null);
         if (snapshot == null) {
             return List.of();
         }
 
-        List<CommonModuleImpact> impacts =
-                commonModuleImpactRepository.findBySnapshotAndCommonModuleNameInIgnoreCase(
-                        snapshot,
-                        Set.of(commonModuleName.toLowerCase(Locale.ROOT))
-                );
+        List<CommonModuleImpact> impacts;
+
+        if (isBlank(q)) {
+            if (objectType == null) {
+                impacts = commonModuleImpactRepository
+                        .findTop100BySnapshotOrderByCommonModuleNameAscObjectTypeAscObjectNameAsc(snapshot);
+            } else {
+                impacts = commonModuleImpactRepository
+                        .findBySnapshotAndObjectTypeOrderByCommonModuleNameAscObjectNameAsc(snapshot, objectType);
+            }
+        } else {
+            impacts = commonModuleImpactRepository
+                    .findBySnapshotAndCommonModuleNameContainingIgnoreCaseOrderByCommonModuleNameAscObjectTypeAscObjectNameAsc(
+                            snapshot,
+                            q.trim()
+                    );
+
+            if (objectType != null) {
+                impacts = impacts.stream()
+                        .filter(x -> x.getObjectType() == objectType)
+                        .toList();
+            }
+        }
 
         return impacts.stream()
+                .filter(row -> !isBlank(row.getCommonModuleName()))
                 .filter(row -> row.getObjectType() != null)
                 .filter(row -> !isBlank(row.getObjectName()))
-                .filter(row -> objectType == null || row.getObjectType() == objectType)
                 .map(row -> DependencyRow.builder()
                         .commonModuleName(row.getCommonModuleName())
                         .objectType(row.getObjectType())
@@ -84,9 +95,7 @@ public class DependencyTreeSearchService {
             return List.of();
         }
 
-        DependencySnapshot snapshot = getLatestReadySnapshot()
-                .orElse(null);
-
+        DependencySnapshot snapshot = getLatestReadySnapshot().orElse(null);
         if (snapshot == null) {
             return List.of();
         }
@@ -95,7 +104,7 @@ public class DependencyTreeSearchService {
                 .filter(x -> x != null && !x.isBlank())
                 .map(String::trim)
                 .map(x -> x.toLowerCase(Locale.ROOT))
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
 
         if (normalizedNames.isEmpty()) {
             return List.of();
