@@ -18,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+//import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -28,7 +28,6 @@ import java.time.OffsetDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,6 +36,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -62,8 +62,11 @@ public class DependencyTreeBuildService {
     private final DependencyCallExclusionRepository dependencyCallExclusionRepository;
     private final BslDependencyParser bslDependencyParser;
     private final OneCNameDecoder oneCNameDecoder;
+    private static final int IMPACT_BATCH_SIZE = 1000;
+    private static final int EDGE_BATCH_SIZE = 1000;
+    private static final long MAX_BSL_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
 
-    @Transactional
+    //@Transactional
     public DependencySnapshot fullRebuild() {
         CodeSourceRoot sourceRoot = codeSourceRootRepository
                 .findFirstBySourceKindAndEnabledIsTrue(SourceKind.BASE)
@@ -71,7 +74,7 @@ public class DependencyTreeBuildService {
         return fullRebuild(sourceRoot.getId());
     }
 
-    @Transactional
+   // @Transactional
     public DependencySnapshot fullRebuild(UUID sourceRootId) {
         CodeSourceRoot sourceRoot = codeSourceRootRepository.findById(sourceRootId)
                 .orElseThrow(() -> new IllegalArgumentException("Источник кода не найден: " + sourceRootId));
@@ -85,27 +88,14 @@ public class DependencyTreeBuildService {
         snapshot.setNotes("Запущено полное сканирование");
         snapshot = dependencySnapshotRepository.save(snapshot);
 
-        log.info("[DEP-SCAN:START] Start dependency rebuild. sourceRootId={}, sourceName={}, rootPath={}",
-                sourceRoot.getId(), sourceRoot.getSourceName(), sourceRoot.getRootPath());
+      //  log.info("[DEP-SCAN:START] Start dependency rebuild. sourceRootId={}, sourceName={}, rootPath={}",
+        //        sourceRoot.getId(), sourceRoot.getSourceName(), sourceRoot.getRootPath());
 
         try {
+            dependencyEdgeRepository.deleteBySnapshot(snapshot);
+            commonModuleImpactRepository.deleteBySnapshot(snapshot);
+
             BuildArtifacts artifacts = scanSource(sourceRoot, snapshot);
-
-            if (!artifacts.edges().isEmpty()) {
-                dependencyEdgeRepository.saveAll(artifacts.edges());
-                log.info("[DEP-SCAN:SAVE_EDGES] Saved dependency edges: {} | path={}",
-                        artifacts.edges().size(), sourceRoot.getRootPath());
-            } else {
-                log.info("[DEP-SCAN:SAVE_EDGES] No dependency edges to save | path={}", sourceRoot.getRootPath());
-            }
-
-            if (!artifacts.impacts().isEmpty()) {
-                commonModuleImpactRepository.saveAll(artifacts.impacts());
-                log.info("[DEP-SCAN:SAVE_IMPACTS] Saved common module impacts: {} | path={}",
-                        artifacts.impacts().size(), sourceRoot.getRootPath());
-            } else {
-                log.info("[DEP-SCAN:SAVE_IMPACTS] No common module impacts to save | path={}", sourceRoot.getRootPath());
-            }
 
             snapshot.setFilesScanned(artifacts.filesScanned());
             snapshot.setStatus(DependencySnapshotStatus.READY);
@@ -115,13 +105,6 @@ public class DependencyTreeBuildService {
 
             dependencyGraphStateService.markSnapshotReady(snapshot);
 
-            log.info("[DEP-SCAN:FINISH] Rebuild finished successfully. filesScanned={}, skipped={}, edges={}, impacts={} | path={}",
-                    artifacts.filesScanned(),
-                    artifacts.skippedFiles(),
-                    artifacts.edges().size(),
-                    artifacts.impacts().size(),
-                    sourceRoot.getRootPath());
-
             return snapshot;
         } catch (Exception e) {
             snapshot.setStatus(DependencySnapshotStatus.FAILED);
@@ -129,8 +112,8 @@ public class DependencyTreeBuildService {
             snapshot.setNotes(errorMessage(e));
             snapshot = dependencySnapshotRepository.save(snapshot);
 
-            log.error("[DEP-SCAN:REBUILD_FAILED] Dependency rebuild failed: {} | path={}",
-                    errorMessage(e), sourceRoot.getRootPath(), e);
+           // log.error("[DEP-SCAN:REBUILD_FAILED] Dependency rebuild failed: {} | path={}",
+                //    errorMessage(e), sourceRoot.getRootPath(), e);
 
             return snapshot;
         }
@@ -138,8 +121,7 @@ public class DependencyTreeBuildService {
 
     private BuildArtifacts scanSource(CodeSourceRoot sourceRoot, DependencySnapshot snapshot) throws IOException {
         Path root = Path.of(sourceRoot.getRootPath()).toAbsolutePath().normalize();
-
-        log.info("[DEP-SCAN:ROOT_CHECK] Checking source root | path={}", root);
+      //  log.info("[DEP-SCAN:ROOT_CHECK] Checking source root | path={}", root);
 
         if (!Files.isDirectory(root)) {
             throw new IllegalStateException("Каталог исходников не найден: " + root);
@@ -155,186 +137,313 @@ public class DependencyTreeBuildService {
                     .toList();
         }
 
-        log.info("[DEP-SCAN:DISCOVER] Found BSL files: {} | path={}", bslFiles.size(), root);
+        List<Path> commonModuleFiles = bslFiles.stream()
+                .filter(f -> isRoot(root, f, "CommonModules"))
+                .toList();
 
-        Set<String> knownCommonModules = collectKnownCommonModules(root, bslFiles);
-        log.info("[DEP-SCAN:COMMON_MODULES] Known common modules: {} | path={}", knownCommonModules.size(), root);
+        List<Path> objectFiles = bslFiles.stream()
+                .filter(f -> !isRoot(root, f, "CommonModules"))
+                .toList();
+
+      //  log.info("[DEP-SCAN:DISCOVER] Found BSL files: {} | commonModules={} | objectFiles={} | path={}",
+        //        bslFiles.size(), commonModuleFiles.size(), objectFiles.size(), root);
+
+        Set<String> knownCommonModules = collectKnownCommonModules(root, commonModuleFiles);
+        //log.info("[DEP-SCAN:COMMON_MODULES] Known common modules: {} | path={}", knownCommonModules.size(), root);
 
         Set<String> excludedCalls = dependencyCallExclusionRepository.findAllByEnabledIsTrueOrderByCallNameAsc().stream()
                 .map(DependencyCallExclusion::getCallName)
                 .filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
 
-        log.info("[DEP-SCAN:EXCLUSIONS] Excluded calls loaded: {} | path={}", excludedCalls.size(), root);
+        //log.info("[DEP-SCAN:EXCLUSIONS] Excluded calls loaded: {} | path={}", excludedCalls.size(), root);
 
-        List<DependencyEdge> edges = new ArrayList<>();
-        Map<ObjectKey, List<DependencyEdge>> objectDirectEdges = new LinkedHashMap<>();
-        Map<MemberKey, List<DependencyEdge>> commonModuleEdges = new LinkedHashMap<>();
         List<String> skippedFileMessages = new ArrayList<>();
+
+        Map<String, MemberRef> membersByFullName = new LinkedHashMap<>();
+        Map<String, Set<String>> forwardEdges = new LinkedHashMap<>();
+        Map<String, Set<String>> exportMembersByModule = new LinkedHashMap<>();
 
         int filesProcessed = 0;
         int skippedFiles = 0;
+        int edgesSaved = 0;
+        int impactsSaved = 0;
 
-        for (Path file : bslFiles) {
+        List<DependencyEdge> edgeBatch = new ArrayList<>(EDGE_BATCH_SIZE);
+        List<CommonModuleImpact> impactBatch = new ArrayList<>(IMPACT_BATCH_SIZE);
+
+        for (Path file : commonModuleFiles) {
             String rel = null;
             String decodedRel = null;
 
             try {
-                log.info("[DEP-SCAN:FILE_START] Processing file | path={}", file);
-
                 rel = normalizeRel(root.relativize(file));
-                log.info("[DEP-SCAN:RELATIVIZE_OK] rel={} | path={}", rel, file);
+                decodedRel = decodeRelativePath(rel);
 
-                decodedRel = oneCNameDecoder.decodePath(rel);
-                log.info("[DEP-SCAN:DECODE_PATH_OK] decodedRel={} | path={}", decodedRel, file);
+                String text = readText(file);
+                BslDependencyParser.ParsedCommonModule parsed = bslDependencyParser.parseCommonModule(
+                        file, text, root, knownCommonModules, excludedCalls);
 
-                String text = Files.readString(file, StandardCharsets.UTF_8);
-                log.info("[DEP-SCAN:READ_FILE_OK] textLength={} | path={}", text.length(), file);
+                logParsedCommonModule(parsed);
 
-                BslDependencyParser.ParsedFile parsed =
-                        bslDependencyParser.parse(file, text, root, knownCommonModules, excludedCalls);
-
-                int callCount = parsed.getCalls() == null ? 0 : parsed.getCalls().size();
-                log.info("[DEP-SCAN:PARSE_FILE_OK] callerType={}, callerName={}, calls={} | path={}",
-                        parsed.getCallerType(), parsed.getCallerName(), callCount, file);
-
-                if (parsed.getCallerType() == null || parsed.getCallerName() == null || parsed.getCalls() == null) {
-                    log.info("[DEP-SCAN:FILE_SKIPPED_EMPTY] Parsed file has no caller or calls | path={}", file);
+                if (parsed == null) {
+                   // log.info("[DEP-SCAN:COMMON_MODULE_SKIPPED_EMPTY] path={}", file);
                     continue;
                 }
 
-                for (BslDependencyParser.ParsedCall call : parsed.getCalls()) {
-                    if (call.getCalleeModule() == null || call.getCalleeModule().isBlank()) {
+                List<BslDependencyParser.MemberDefinition> members =
+                        parsed.getMembers() == null ? List.of() : parsed.getMembers();
+
+                for (BslDependencyParser.MemberDefinition member : members) {
+                    MemberRef ref = new MemberRef(member.getModuleName(), member.getMemberName(), member.isExported());
+                    membersByFullName.put(ref.fullName(), ref);
+
+                    if (member.isExported()) {
+                        exportMembersByModule
+                                .computeIfAbsent(member.getModuleName().toLowerCase(Locale.ROOT), k -> new LinkedHashSet<>())
+                                .add(member.getMemberName().toLowerCase(Locale.ROOT));
+                    }
+                }
+
+                List<BslDependencyParser.ModuleCall> calls =
+                        parsed.getCalls() == null ? List.of() : parsed.getCalls();
+
+                for (BslDependencyParser.ModuleCall call : calls) {
+                    if (isBlank(call.getCallerModule())
+                            || isBlank(call.getCallerMember())
+                            || isBlank(call.getCalleeModule())
+                            || isBlank(call.getCalleeMember())) {
                         continue;
                     }
 
+                    String callerFull = call.getCallerModule() + "." + call.getCallerMember();
+                    String calleeFull = call.getCalleeModule() + "." + call.getCalleeMember();
+                    forwardEdges.computeIfAbsent(callerFull, k -> new LinkedHashSet<>()).add(calleeFull);
+
                     DependencyEdge edge = new DependencyEdge();
                     edge.setSnapshot(snapshot);
-                    edge.setCallerType(parsed.getCallerType());
-                    edge.setCallerName(parsed.getCallerName());
+                    edge.setCallerType(DependencyCallerType.COMMON_MODULE);
+                    edge.setCallerName(call.getCallerModule());
                     edge.setCallerMember(call.getCallerMember());
                     edge.setCalleeModule(call.getCalleeModule());
                     edge.setCalleeMember(call.getCalleeMember());
                     edge.setSourcePath(call.getSourcePath());
                     edge.setCreatedAt(OffsetDateTime.now());
-                    edges.add(edge);
 
-                    if (parsed.getCallerType() == DependencyCallerType.COMMON_MODULE) {
-                        MemberKey key = new MemberKey(parsed.getCallerName(), call.getCallerMember());
-                        commonModuleEdges.computeIfAbsent(key, k -> new ArrayList<>()).add(edge);
-                    } else {
-                        ObjectKey key = new ObjectKey(parsed.getCallerType(), parsed.getCallerName(), call.getSourcePath());
-                        objectDirectEdges.computeIfAbsent(key, k -> new ArrayList<>()).add(edge);
+                    edgeBatch.add(edge);
+
+                    if (edgeBatch.size() >= EDGE_BATCH_SIZE) {
+                        dependencyEdgeRepository.saveAll(edgeBatch);
+                        edgesSaved += edgeBatch.size();
+                        edgeBatch.clear();
                     }
                 }
-
+                if (!edgeBatch.isEmpty()) {
+                    dependencyEdgeRepository.saveAll(edgeBatch);
+                    edgesSaved += edgeBatch.size();
+                    edgeBatch.clear();
+                }
                 filesProcessed++;
                 snapshot.setFilesScanned(filesProcessed);
-
-                log.info("[DEP-SCAN:FILE_OK] Processed successfully. processed={}, edges={} | path={}",
-                        filesProcessed, edges.size(), file);
-
             } catch (Exception e) {
                 skippedFiles++;
-
-                String msg = "Пропущен файл: " + file
+                String msg = "Пропущен общий модуль: " + file
                         + " | rel=" + nvl(rel)
                         + " | decodedRel=" + nvl(decodedRel)
                         + " | error=" + errorMessage(e);
 
                 skippedFileMessages.add(msg);
-                log.warn("[DEP-SCAN:FILE_SKIPPED_ERROR] {}", msg, e);
-
-                continue;
+                logSkippedFile(file, rel, decodedRel, e, "COMMON_MODULE_SKIPPED");
             }
         }
 
-        log.info("[DEP-SCAN:BUILD_IMPACTS_START] objectKeys={}, commonModuleKeys={} | path={}",
-                objectDirectEdges.size(), commonModuleEdges.size(), root);
+        Map<String, Set<String>> exportToReachableMembers =
+                buildExportReachability(membersByFullName, exportMembersByModule, forwardEdges);
 
-        List<CommonModuleImpact> impacts = buildImpacts(snapshot, objectDirectEdges, commonModuleEdges);
+      //  log.info("[DEP-SCAN:LOG_VERSION] export-index-debug-v1");
+        logExportIndex(exportMembersByModule);
+       // log.info("[DEP-SCAN:OBJECT_FILES] count={}", objectFiles.size());
 
-        log.info("[DEP-SCAN:BUILD_IMPACTS_OK] impacts={} | path={}", impacts.size(), root);
-        log.info("[DEP-SCAN:FINISH_SCAN] processed={}, skipped={}, edges={}, impacts={} | path={}",
-                filesProcessed, skippedFiles, edges.size(), impacts.size(), root);
+        //Set<ImpactKey> impactDedup = new LinkedHashSet<>();
+
+        for (Path file : objectFiles) {
+            Set<ImpactKey> impactDedup = new LinkedHashSet<>();
+            String rel = null;
+            String decodedRel = null;
+
+            try {
+                rel = normalizeRel(root.relativize(file));
+                decodedRel = decodeRelativePath(rel);
+
+                String text = readText(file);
+                BslDependencyParser.ParsedObjectUsages parsed =
+                        bslDependencyParser.parseObjectExportUsages(file, text, root, exportMembersByModule);
+
+                logParsedObjectUsages(parsed);
+
+                if (parsed == null || parsed.getUsages() == null || parsed.getUsages().isEmpty()) {
+                    filesProcessed++;
+                    snapshot.setFilesScanned(filesProcessed);
+                    continue;
+                }
+
+                for (BslDependencyParser.ObjectExportUsage usage : parsed.getUsages()) {
+                    if (isBlank(usage.getExportModule()) || isBlank(usage.getExportMember())) {
+                        continue;
+                    }
+
+                    String exportFull = usage.getExportModule() + "." + usage.getExportMember();
+                    Set<String> affectedMembers = exportToReachableMembers.getOrDefault(exportFull, Set.of(exportFull));
+
+                    for (String affectedFull : affectedMembers) {
+                        MemberRef affected = membersByFullName.get(affectedFull);
+                        if (affected == null) {
+                            continue;
+                        }
+
+                        ImpactKey impactKey = new ImpactKey(
+                                affected.moduleName(),
+                                affected.memberName(),
+                                parsed.getObjectType(),
+                                parsed.getObjectName(),
+                                usage.getExportModule(),
+                                usage.getExportMember(),
+                                parsed.getSourcePath()
+                        );
+
+                        if (!impactDedup.add(impactKey)) {
+                            continue;
+                        }
+
+                        CommonModuleImpact impact = new CommonModuleImpact();
+                        impact.setSnapshot(snapshot);
+                        impact.setCommonModuleName(affected.moduleName());
+                        impact.setCommonModuleMemberName(affected.memberName());
+                        impact.setObjectType(parsed.getObjectType());
+                        impact.setObjectName(parsed.getObjectName());
+                        impact.setSourcePath(parsed.getSourcePath());
+                        impact.setViaModule(usage.getExportModule());
+                        impact.setViaMember(usage.getExportMember());
+                        impact.setCreatedAt(OffsetDateTime.now());
+                        //impacts.add(impact);
+                        impactBatch.add(impact);
+
+                        if (impactBatch.size() >= IMPACT_BATCH_SIZE) {
+                            commonModuleImpactRepository.saveAll(impactBatch);
+                            impactsSaved += impactBatch.size();
+                            impactBatch.clear();
+                        }
+                    }
+                }
+
+                filesProcessed++;
+                snapshot.setFilesScanned(filesProcessed);
+            } catch (Exception e) {
+                skippedFiles++;
+                String msg = "Пропущен объектный модуль: " + file
+                        + " | rel=" + nvl(rel)
+                        + " | decodedRel=" + nvl(decodedRel)
+                        + " | error=" + errorMessage(e);
+
+                skippedFileMessages.add(msg);
+              //  log.warn("[DEP-SCAN:OBJECT_FILE_SKIPPED] {}", msg);
+            }
+        }
+        if (!impactBatch.isEmpty()) {
+            commonModuleImpactRepository.saveAll(impactBatch);
+            impactsSaved += impactBatch.size();
+            impactBatch.clear();
+        }
+
+      //  log.info("[DEP-SCAN:BUILD_COMPLETE] processed={} | skipped={} | edges={} | impacts={} | path={}",
+        //        filesProcessed, skippedFiles, edges.size(), impactsSaved, root);
 
         int previewLimit = Math.min(skippedFileMessages.size(), 50);
         for (int i = 0; i < previewLimit; i++) {
-            log.warn("[DEP-SCAN:SKIPPED_FILE] {}", skippedFileMessages.get(i));
+          //  log.warn("[DEP-SCAN:SKIPPED_FILE] {}", skippedFileMessages.get(i));
         }
         if (skippedFileMessages.size() > previewLimit) {
-            log.warn("[DEP-SCAN:SKIPPED_FILE] Всего пропущено файлов: {}. В лог выведены первые {}.",
-                    skippedFileMessages.size(), previewLimit);
+            //log.warn("[DEP-SCAN:SKIPPED_FILE] Всего пропущено файлов: {}. В лог выведены первые {}.",
+              //      skippedFileMessages.size(), previewLimit);
         }
 
-        return new BuildArtifacts(filesProcessed, skippedFiles, skippedFileMessages, edges, impacts);
+        return new BuildArtifacts(filesProcessed, skippedFiles, skippedFileMessages, edgesSaved, impactsSaved);
     }
 
-    private Set<String> collectKnownCommonModules(Path sourceRoot, List<Path> bslFiles) {
+    private Map<String, Set<String>> buildExportReachability(
+            Map<String, MemberRef> membersByFullName,
+            Map<String, Set<String>> exportMembersByModule,
+            Map<String, Set<String>> forwardEdges
+    ) {
+        Map<String, Set<String>> exportToReachable = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Set<String>> entry : exportMembersByModule.entrySet()) {
+            String moduleLower = entry.getKey();
+
+            for (String memberLower : entry.getValue()) {
+                MemberRef exportRef = findMember(membersByFullName, moduleLower, memberLower);
+                if (exportRef == null) {
+                    //log.warn("[DEP-SCAN:EXPORT_REACHABILITY_MISS] moduleLower={} | memberLower={}",
+                     //       moduleLower, memberLower);
+                    continue;
+                }
+
+                Set<String> visited = new LinkedHashSet<>();
+                Deque<String> stack = new ArrayDeque<>();
+                stack.push(exportRef.fullName());
+
+                while (!stack.isEmpty()) {
+                    String current = stack.pop();
+                    if (!visited.add(current)) {
+                        continue;
+                    }
+
+                    for (String next : forwardEdges.getOrDefault(current, Set.of())) {
+                        stack.push(next);
+                    }
+                }
+
+                exportToReachable.put(exportRef.fullName(), visited);
+
+             //   log.info("[DEP-SCAN:EXPORT_REACHABILITY_ITEM] export={} | reachable={}",
+               //         exportRef.fullName(),
+                 //       visited);
+            }
+        }
+
+    //    log.info("[DEP-SCAN:EXPORT_REACHABILITY] exportsIndexed={}", exportToReachable.size());
+        return exportToReachable;
+    }
+
+    private MemberRef findMember(Map<String, MemberRef> membersByFullName, String moduleLower, String memberLower) {
+        for (MemberRef ref : membersByFullName.values()) {
+            if (ref.moduleName().toLowerCase(Locale.ROOT).equals(moduleLower)
+                    && ref.memberName().toLowerCase(Locale.ROOT).equals(memberLower)) {
+                return ref;
+            }
+        }
+        return null;
+    }
+
+    private String readText(Path file) throws IOException {
+        long size = Files.size(file);
+
+        if (size > MAX_BSL_FILE_SIZE_BYTES) {
+            throw new IOException("Файл слишком большой для разбора: " + file + ", size=" + size + " bytes");
+        }
+        return Files.readString(file, StandardCharsets.UTF_8);
+    }
+
+    private Set<String> collectKnownCommonModules(Path sourceRoot, List<Path> commonModuleFiles) {
         Set<String> modules = new LinkedHashSet<>();
-        for (Path file : bslFiles) {
+        for (Path file : commonModuleFiles) {
             Path rel = sourceRoot.relativize(file);
             if (rel.getNameCount() < 2) {
-                continue;
-            }
-            String first = oneCNameDecoder.decodePathSegment(rel.getName(0).toString());
-            if (!"CommonModules".equals(first)) {
                 continue;
             }
             modules.add(oneCNameDecoder.decodePathSegment(rel.getName(1).toString()));
         }
         return modules;
-    }
-
-    private List<CommonModuleImpact> buildImpacts(
-            DependencySnapshot snapshot,
-            Map<ObjectKey, List<DependencyEdge>> objectDirectEdges,
-            Map<MemberKey, List<DependencyEdge>> commonModuleEdges
-    ) {
-        List<CommonModuleImpact> impacts = new ArrayList<>();
-        OffsetDateTime now = OffsetDateTime.now();
-
-        for (Map.Entry<ObjectKey, List<DependencyEdge>> e : objectDirectEdges.entrySet()) {
-            ObjectKey objectKey = e.getKey();
-            Deque<Traversal> queue = new ArrayDeque<>();
-            Set<String> seen = new HashSet<>();
-
-            for (DependencyEdge edge : e.getValue()) {
-                queue.addLast(new Traversal(edge.getCalleeModule(), edge.getCalleeMember(), null, edge.getCalleeMember()));
-            }
-
-            while (!queue.isEmpty()) {
-                Traversal t = queue.removeFirst();
-                String dedupKey = objectKey.type() + "|" + objectKey.name() + "|" + objectKey.sourcePath()
-                        + "|" + nvl(t.module()) + "|" + nvl(t.member()) + "|" + nvl(t.viaModule()) + "|" + nvl(t.viaMember());
-                if (!seen.add(dedupKey)) {
-                    continue;
-                }
-
-                CommonModuleImpact row = new CommonModuleImpact();
-                row.setSnapshot(snapshot);
-                row.setCommonModuleName(t.module());
-                row.setObjectType(objectKey.type());
-                row.setObjectName(objectKey.name());
-                row.setSourcePath(objectKey.sourcePath());
-                row.setViaModule(t.viaModule());
-                row.setViaMember(t.viaMember() == null ? t.member() : t.viaMember());
-                row.setCreatedAt(now);
-                impacts.add(row);
-
-                MemberKey current = new MemberKey(t.module(), t.member());
-                for (DependencyEdge next : commonModuleEdges.getOrDefault(current, List.of())) {
-                    queue.addLast(new Traversal(
-                            next.getCalleeModule(),
-                            next.getCalleeMember(),
-                            t.module(),
-                            t.member()
-                    ));
-                }
-            }
-        }
-
-        return impacts;
     }
 
     private boolean belongsToAllowedRoot(Path sourceRoot, Path file) {
@@ -346,8 +455,27 @@ public class DependencyTreeBuildService {
         return ALLOWED_ROOTS.contains(first);
     }
 
+    private boolean isRoot(Path sourceRoot, Path file, String expectedRoot) {
+        Path rel = sourceRoot.relativize(file);
+        if (rel.getNameCount() == 0) {
+            return false;
+        }
+        String first = oneCNameDecoder.decodePathSegment(rel.getName(0).toString());
+        return expectedRoot.equalsIgnoreCase(first);
+    }
+
     private String normalizeRel(Path relPath) {
         return relPath.toString().replace('\\', '/');
+    }
+
+    private String decodeRelativePath(String relPath) {
+        if (relPath == null || relPath.isBlank()) {
+            return relPath;
+        }
+
+        return Stream.of(relPath.split("/"))
+                .map(oneCNameDecoder::decodePathSegment)
+                .collect(Collectors.joining("/"));
     }
 
     private String buildFinishNotes(BuildArtifacts artifacts) {
@@ -360,10 +488,7 @@ public class DependencyTreeBuildService {
             return base;
         }
 
-        List<String> preview = artifacts.skippedFileMessages().stream()
-                .limit(3)
-                .toList();
-
+        List<String> preview = artifacts.skippedFileMessages().stream().limit(3).toList();
         return base + ". Первые ошибки: " + String.join(" ; ", preview);
     }
 
@@ -375,19 +500,149 @@ public class DependencyTreeBuildService {
         return e.getClass().getName() + ": " + message;
     }
 
-    private static String nvl(String s) {
-        return s == null ? "" : s;
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private record BuildArtifacts(
             int filesScanned,
             int skippedFiles,
             List<String> skippedFileMessages,
-            List<DependencyEdge> edges,
-            List<CommonModuleImpact> impacts
-    ) {}
+            int edgesSaved,
+            int impactsSaved
+    ) {
+    }
 
-    private record ObjectKey(DependencyCallerType type, String name, String sourcePath) {}
-    private record MemberKey(String module, String member) {}
-    private record Traversal(String module, String member, String viaModule, String viaMember) {}
+    private record MemberRef(String moduleName, String memberName, boolean exported) {
+        String fullName() {
+            return moduleName + "." + memberName;
+        }
+    }
+
+    private void logParsedCommonModule(BslDependencyParser.ParsedCommonModule parsed) {
+        if (parsed == null) {
+            return;
+        }
+
+        List<String> members = parsed.getMembers() == null
+                ? List.of()
+                : parsed.getMembers().stream()
+                .map(m -> m.getMemberName() + (m.isExported() ? " [export]" : ""))
+                .sorted()
+                .toList();
+
+        List<String> exports = parsed.getMembers() == null
+                ? List.of()
+                : parsed.getMembers().stream()
+                .filter(BslDependencyParser.MemberDefinition::isExported)
+                .map(BslDependencyParser.MemberDefinition::getMemberName)
+                .sorted()
+                .toList();
+
+        List<String> calls = parsed.getCalls() == null
+                ? List.of()
+                : parsed.getCalls().stream()
+                .map(c -> c.getCallerModule() + "." + nvl(c.getCallerMember())
+                        + " -> "
+                        + c.getCalleeModule() + "." + nvl(c.getCalleeMember()))
+                .sorted()
+                .toList();
+
+      /*  log.info("[DEP-SCAN:COMMON_MODULE_PARSED] module={} | path={} | membersCount={} | exportsCount={} | callsCount={}",
+                parsed.getModuleName(),
+                parsed.getSourcePath(),
+                members.size(),
+                exports.size(),
+                calls.size());
+
+        log.info("[DEP-SCAN:COMMON_MODULE_MEMBERS] module={} | members={}",
+                parsed.getModuleName(),
+                members);
+
+        log.info("[DEP-SCAN:COMMON_MODULE_EXPORTS] module={} | exports={}",
+                parsed.getModuleName(),
+                exports);*/
+
+        int callsLimit = Math.min(calls.size(), 100);
+        if (!calls.isEmpty()) {
+           /* log.info("[DEP-SCAN:COMMON_MODULE_CALLS] module={} | showingFirst={} | calls={}",
+                    parsed.getModuleName(),
+                    callsLimit,
+                    calls.subList(0, callsLimit));
+
+            if (calls.size() > callsLimit) {
+                log.info("[DEP-SCAN:COMMON_MODULE_CALLS] module={} | totalCalls={} | truncated=true",
+                        parsed.getModuleName(),
+                        calls.size());
+            }*/
+        }
+    }
+
+    private void logParsedObjectUsages(BslDependencyParser.ParsedObjectUsages parsed) {
+        if (parsed == null) {
+            return;
+        }
+
+        List<String> usages = parsed.getUsages() == null
+                ? List.of()
+                : parsed.getUsages().stream()
+                .map(u -> u.getExportModule() + "." + u.getExportMember())
+                .sorted()
+                .toList();
+
+     /*   log.info("[DEP-SCAN:OBJECT_USAGE] type={} | object={} | path={} | usagesCount={}",
+                parsed.getObjectType(),
+                parsed.getObjectName(),
+                parsed.getSourcePath(),
+                usages.size());*/
+
+        int limit = Math.min(usages.size(), 20);
+        if (limit > 0) {
+           /* log.info("[DEP-SCAN:OBJECT_USAGE_DETAILS] type={} | object={} | showingFirst={} | usages={}",
+                    parsed.getObjectType(),
+                    parsed.getObjectName(),
+                    limit,
+                    usages.subList(0, limit));*/
+        }
+
+        if (usages.size() > limit) {
+          /*  log.info("[DEP-SCAN:OBJECT_USAGE_DETAILS] type={} | object={} | totalUsages={} | truncated=true",
+                    parsed.getObjectType(),
+                    parsed.getObjectName(),
+                    usages.size());*/
+        }
+    }
+
+    private void logSkippedFile(Path file, String rel, String decodedRel, Exception e, String phase) {
+      /*  log.warn("[DEP-SCAN:{}] file={} | rel={} | decodedRel={} | error={}",
+                phase,
+                file,
+                nvl(rel),
+                nvl(decodedRel),
+                errorMessage(e));*/
+    }
+
+    private static String nvl(String s) {
+        return s == null ? "" : s;
+    }
+
+    private void logExportIndex(Map<String, Set<String>> exportMembersByModule) {
+     /*   log.info("[DEP-SCAN:EXPORT_INDEX] modulesWithExports={}", exportMembersByModule.size());
+
+        exportMembersByModule.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> log.info("[DEP-SCAN:EXPORT_INDEX_MODULE] module={} | exports={}",
+                        e.getKey(),
+                        e.getValue().stream().sorted().toList()));*/
+    }
+    private record ImpactKey(
+            String commonModuleName,
+            String commonModuleMemberName,
+            DependencyCallerType objectType,
+            String objectName,
+            String viaModule,
+            String viaMember,
+            String sourcePath
+    ) {
+    }
 }

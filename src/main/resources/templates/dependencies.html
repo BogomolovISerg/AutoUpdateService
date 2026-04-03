@@ -161,19 +161,21 @@
                 <thead>
                 <tr>
                     <th>Общий модуль</th>
+                    <th>Процедура / функция</th>
                     <th>Тип объекта</th>
                     <th>Объект</th>
-                    <th>Через модуль</th>
-                    <th>Через процедуру</th>
+                    <th>Экспортный модуль</th>
+                    <th>Экспортная процедура</th>
                     <th>Путь</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr th:if="${#lists.isEmpty(rows)}">
-                    <td colspan="6" class="small">Данных нет</td>
+                    <td colspan="7" class="small">Данных нет</td>
                 </tr>
                 <tr th:each="r : ${rows}">
                     <td th:text="${r.commonModuleName}">ОбщийМодуль</td>
+                    <td th:text="${r.commonModuleMemberName} ?: '—'">Процедура</td>
                     <td th:text="${r.objectType}">DOCUMENT</td>
                     <td th:text="${r.objectName}">ЗаказПокупателя</td>
                     <td th:text="${r.viaModule} ?: '—'">—</td>

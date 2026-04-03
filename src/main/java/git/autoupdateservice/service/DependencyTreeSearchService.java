@@ -59,6 +59,7 @@ public class DependencyTreeSearchService {
                 .filter(r -> objectType == null || r.getObjectType() == objectType)
                 .map(r -> DependencySearchRow.builder()
                         .commonModuleName(r.getCommonModuleName())
+                        .commonModuleMemberName(r.getCommonModuleMemberName())
                         .objectType(r.getObjectType())
                         .objectName(r.getObjectName())
                         .viaModule(r.getViaModule())

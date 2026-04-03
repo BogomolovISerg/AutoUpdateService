@@ -24,6 +24,9 @@ public class CommonModuleImpact {
     @Column(name = "common_module_name", nullable = false, length = 255)
     private String commonModuleName;
 
+    @Column(name = "common_module_member_name", length = 255)
+    private String commonModuleMemberName;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "object_type", nullable = false, length = 50)
     private DependencyCallerType objectType;

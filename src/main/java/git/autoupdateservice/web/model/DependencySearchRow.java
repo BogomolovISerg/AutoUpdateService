@@ -8,6 +8,7 @@ import lombok.Value;
 @Builder
 public class DependencySearchRow {
     String commonModuleName;
+    String commonModuleMemberName;
     DependencyCallerType objectType;
     String objectName;
     String viaModule;
