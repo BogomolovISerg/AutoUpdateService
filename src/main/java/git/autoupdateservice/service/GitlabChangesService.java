@@ -160,9 +160,7 @@ public class GitlabChangesService {
         if (code >= 200 && code < 300) return;
         String body = response.body();
         if (body == null) body = "";
-        body = body.replace("
-                ", " ").replace("
-                ", " ");
+        body = body.replace("\r", " ").replace("\n", " ");
         if (body.length() > 500) body = body.substring(0, 500);
         throw new IOException("GitLab API request failed: status=" + code + ", url=" + url + ", body=" + body);
     }

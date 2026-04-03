@@ -5,7 +5,6 @@ import git.autoupdateservice.domain.*;
 import git.autoupdateservice.repo.ExecutionRunRepository;
 import git.autoupdateservice.repo.SettingsRepository;
 import git.autoupdateservice.repo.StepLogBlobRepository;
-import git.autoupdateservice.repo.TaskChangedFileRepository;
 import git.autoupdateservice.repo.UpdateTaskRepository;
 import git.autoupdateservice.service.steps.RunStepDef;
 import git.autoupdateservice.service.steps.StepPlanLoader;
@@ -32,7 +31,6 @@ public class UpdateExecutor {
     private final AuditLogService auditLogService;
 
     private final StepLogBlobRepository stepLogBlobRepository;
-    private final TaskChangedFileRepository taskChangedFileRepository;
 
     private final StepLogAnalyzer stepLogAnalyzer;
 
@@ -42,7 +40,6 @@ public class UpdateExecutor {
 
     private final JdbcTemplate jdbcTemplate;
     private final RunnerLogsCleanupService runnerLogsCleanupService;
-    private final GitlabChangesService gitlabChangesService;
 
     private boolean tryAcquireRunLock() {
         Boolean ok = jdbcTemplate.queryForObject("select pg_try_advisory_lock(987654321)", Boolean.class);
@@ -122,8 +119,6 @@ public class UpdateExecutor {
             Path logRoot = Path.of(runnerProperties.logDir());
             Path runDir = logRoot.resolve("run-" + run.getId());
             Path workDir = runDir;
-
-            collectGitChangesAtStart(run, tasks);
 
             // Precompute repo paths (from tasks; fallback to runner.* properties if task repo_path is empty)
             String mainRepoPath = null;
@@ -216,110 +211,6 @@ public class UpdateExecutor {
         } finally {
             releaseRunLock();
         }
-    }
-
-    private void collectGitChangesAtStart(ExecutionRun run, List<UpdateTask> tasks) throws Exception {
-        final String code = "FETCH_GIT_CHANGES";
-        final String title = "Запрос изменений из Git";
-
-        auditLogService.info(
-                LogType.STEP_STARTED,
-                title,
-                "{\"code\":" + j(code) + ",\"tasks\":" + tasks.size() + "}",
-                null,
-                "system",
-                run.getId()
-        );
-
-        StringBuilder report = new StringBuilder();
-        int totalFiles = 0;
-
-        try {
-            for (UpdateTask task : tasks) {
-                GitlabChangesService.FetchResult fetched = gitlabChangesService.fetchFullChanges(
-                        task.getProjectPath(),
-                        task.getBeforeSha(),
-                        task.getCommitSha()
-                );
-
-                taskChangedFileRepository.deleteByTask_Id(task.getId());
-
-                List<TaskChangedFile> rows = new ArrayList<>();
-                for (GitlabChangesService.ChangedFile file : fetched.files()) {
-                    TaskChangedFile row = new TaskChangedFile();
-                    row.setTask(task);
-                    row.setRunId(run.getId());
-                    row.setProjectPath(task.getProjectPath());
-                    row.setFromSha(task.getBeforeSha());
-                    row.setToSha(task.getCommitSha());
-                    row.setChangeType(file.changeType());
-                    row.setOldPath(file.oldPath());
-                    row.setNewPath(file.newPath());
-                    rows.add(row);
-                }
-                if (!rows.isEmpty()) {
-                    taskChangedFileRepository.saveAll(rows);
-                }
-
-                totalFiles += rows.size();
-
-                report
-                        .append("=== task=").append(task.getId())
-                        .append(", project=").append(nvl(task.getProjectPath()))
-                        .append(", from=").append(nvl(task.getBeforeSha()))
-                        .append(", to=").append(nvl(task.getCommitSha()))
-                        .append(" ===\n")
-                        .append("source=").append(fetched.source())
-                        .append(", commits=").append(fetched.commitsCount())
-                        .append(", compareTimeout=").append(fetched.compareTimedOut())
-                        .append(", usedCommitFallback=").append(fetched.usedCommitFallback())
-                        .append(", files=").append(rows.size())
-                        .append("\n");
-
-                if (rows.isEmpty()) {
-                    report.append("(no changed files)\n\n");
-                } else {
-                    for (TaskChangedFile row : rows) {
-                        report.append(formatChangedFileLine(row)).append('\n');
-                    }
-                    report.append('\n');
-                }
-            }
-
-            LogEvent event = auditLogService.infoReturn(
-                    LogType.STEP_FINISHED,
-                    title + "\nПолучено файлов: " + totalFiles,
-                    "{\"code\":" + j(code) + ",\"tasks\":" + tasks.size() + ",\"files\":" + totalFiles + "}",
-                    null,
-                    "system",
-                    run.getId()
-            );
-            saveStepLogBlob(event.getId(), run.getId(), code, StepLogKind.STDOUT, report.toString());
-        } catch (Exception e) {
-            LogEvent event = auditLogService.errorReturn(
-                    LogType.STEP_FAILED,
-                    title + "\n" + firstNonBlank(e.getMessage(), "Ошибка получения списка изменений"),
-                    "{\"code\":" + j(code) + ",\"error\":" + j(String.valueOf(e.getMessage())) + "}",
-                    null,
-                    "system",
-                    run.getId()
-            );
-            saveStepLogBlob(event.getId(), run.getId(), code, StepLogKind.STDOUT, report.toString());
-            throw e;
-        }
-    }
-
-    private String formatChangedFileLine(TaskChangedFile row) {
-        if (row.getChangeType() == GitChangeType.RENAMED) {
-            return "[RENAMED] " + nvl(row.getOldPath()) + " -> " + nvl(row.getNewPath());
-        }
-        if (row.getChangeType() == GitChangeType.REMOVED) {
-            return "[REMOVED] " + firstNonBlank(row.getOldPath(), row.getNewPath(), "");
-        }
-        if (row.getChangeType() == GitChangeType.ADDED) {
-            return "[ADDED] " + firstNonBlank(row.getNewPath(), row.getOldPath(), "");
-        }
-        return "[MODIFIED] " + firstNonBlank(row.getNewPath(), row.getOldPath(), "");
     }
 
     private void executeFirstStepWithRetry(
