@@ -56,7 +56,7 @@
 
     <div class="card" th:each="entry : ${grouped}">
         <!-- ✅ Если добавил model.addAttribute("noDate", NO_DATE), то покажем "Без даты" -->
-        <h3 th:text="${noDate != null and entry.key.equals(noDate)} ? 'Без даты' : entry.key">2026-02-24</h3>
+        <h3 th:text="${noDate != null and entry.key.equals(noDate) ? 'Без даты' : entry.key}">2026-02-24</h3>
 
         <div class="table-wrap">
             <table class="table logs-table">

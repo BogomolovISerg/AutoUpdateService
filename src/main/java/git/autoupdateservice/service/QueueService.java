@@ -12,6 +12,7 @@ import org.springframework.core.NestedRuntimeException;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -47,13 +48,9 @@ public class QueueService {
         }
 
         var binding = bindingOpt.get();
-        var s = settingsRepository.findById(1L).orElseThrow();
+        settingsRepository.findById(1L).orElseThrow();
 
-        LocalDate today = LocalDate.now();
-        LocalDate scheduledFor = (s.getNextRunDate() != null && !s.getNextRunDate().isBefore(today))
-                ? s.getNextRunDate()
-                : today.plusDays(1);
-
+        LocalDate scheduledFor = LocalDate.now();
         UpdateTask t = new UpdateTask();
         t.setRepoBinding(binding);
         t.setTargetType(binding.getTargetType());

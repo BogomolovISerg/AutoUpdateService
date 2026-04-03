@@ -8,6 +8,7 @@ import git.autoupdateservice.repo.StepLogBlobRepository;
 import git.autoupdateservice.repo.UpdateTaskRepository;
 import git.autoupdateservice.service.steps.RunStepDef;
 import git.autoupdateservice.service.steps.StepPlanLoader;
+import git.autoupdateservice.util.PasswordMasker;
 import git.autoupdateservice.util.CommandScriptWriter;
 import git.autoupdateservice.util.LogFileUtil;
 import git.autoupdateservice.util.Platform;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.*;
 
@@ -98,12 +98,12 @@ public class UpdateExecutor {
 
             Settings s = settingsRepository.findById(1L).orElseThrow();
 
-            List<UpdateTask> tasks = updateTaskRepository.findReadyToRun(TaskStatus.NEW, LocalDate.now());
+            List<UpdateTask> tasks = updateTaskRepository.findReadyToRun(TaskStatus.NEW);
             if (tasks.isEmpty()) {
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
                 executionRunRepository.save(run);
-                auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{}", null, "system", run.getId());
+                auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{\"status\":\"NEW\"}", null, "system", run.getId());
                 return Optional.of(run);
             }
 
@@ -182,7 +182,7 @@ public class UpdateExecutor {
             } catch (Exception e) {
                 run.setStatus(RunStatus.FAILED);
                 run.setFinishedAt(OffsetDateTime.now());
-                run.setErrorSummary(trim(e.getMessage(), 3500));
+                run.setErrorSummary(trim(PasswordMasker.maskText(e.getMessage()), 3500));
                 executionRunRepository.save(run);
 
                 auditLogService.error(LogType.RUN_FINISHED, "Run failed: " + e.getMessage(),
@@ -491,6 +491,7 @@ public class UpdateExecutor {
     private void saveStepLogBlob(UUID eventId, UUID runId, String code, StepLogKind kind, String content) {
         try {
             if (content == null) content = "";
+            content = PasswordMasker.maskText(content);
             StepLogBlob b = new StepLogBlob();
             b.setEventId(eventId);
             b.setRunId(runId);
@@ -699,42 +700,63 @@ public class UpdateExecutor {
      */
     private static List<String> expandCommand(List<String> src, Map<String, String> ctx, boolean strict) {
         if (src == null) return List.of();
+
         List<String> out = new ArrayList<>(src.size() * 2);
-        for (String raw : src) {
+
+        for (int idx = 0; idx < src.size(); idx++) {
+            String raw = src.get(idx);
             if (raw == null) continue;
+
             String rendered = renderTpl(raw, ctx, strict).trim();
             if (rendered.isBlank()) continue;
 
             int ws = firstWhitespace(rendered);
             if (ws < 0) {
                 out.add(rendered);
-            } else {
-                String head = rendered.substring(0, ws).trim();
-                String tail = rendered.substring(ws).trim();
+                continue;
+            }
+
+            String head = rendered.substring(0, ws).trim();
+            String tail = rendered.substring(ws).trim();
+
+            boolean shouldSplit =
+                    head.startsWith("--") ||
+                            isCommandShortcut(idx, head);
+
+            if (shouldSplit) {
                 if (!head.isBlank()) out.add(head);
                 if (!tail.isBlank()) out.add(tail);
+            } else {
+                out.add(rendered);
             }
         }
 
-        // sanity: не допускаем неразрешённых токенов в командах
-        for (String a : out) {
-            if (a != null && a.contains("{{")) {
-                throw new IllegalStateException("Unresolved token in command arg: " + a);
-            }
-        }
-
-        // Совместимость: иногда встречаются варианты флагов с дефисами.
-        // В runner ожидаемые ключи: --ibconnection, --ibconnectionrepo.
         for (int i = 0; i < out.size(); i++) {
             String a = out.get(i);
             if (a == null) continue;
             String x = a.trim();
+            if (x.contains("{{")) {
+                throw new IllegalStateException("Unresolved token in command arg: " + x);
+            }
             if ("--ib-connection".equalsIgnoreCase(x)) out.set(i, "--ibconnection");
             if ("--ib-connectionrepo".equalsIgnoreCase(x) || "--ib-connection-repo".equalsIgnoreCase(x)) {
                 out.set(i, "--ibconnectionrepo");
             }
         }
+
         return out;
+    }
+
+    private static boolean isCommandShortcut(int index, String head) {
+        if (head == null || head.isBlank()) return false;
+
+        String h = head.trim();
+
+        if (h.startsWith("--")) return false;
+        if (h.startsWith("/")) return false;
+
+        // второй элемент после бинарника: "session lock", "scheduledjobs lock", "updateext path"
+        return index == 1;
     }
 
     private static int firstWhitespace(String s) {

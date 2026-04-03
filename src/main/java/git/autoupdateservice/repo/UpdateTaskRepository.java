@@ -22,8 +22,8 @@ public interface UpdateTaskRepository extends JpaRepository<UpdateTask, UUID> {
 
     List<UpdateTask> findTop200ByStatusOrderByCreatedAtDesc(TaskStatus status);
 
-    @Query("select t from UpdateTask t where t.status = :status and t.scheduledFor <= :date order by t.createdAt asc")
-    List<UpdateTask> findReadyToRun(TaskStatus status, LocalDate date);
+    @Query("select t from UpdateTask t where t.status = :status order by t.createdAt asc")
+    List<UpdateTask> findReadyToRun(TaskStatus status);
 
     @Query("select t from UpdateTask t " +
             "where t.scheduledFor >= coalesce(:from, t.scheduledFor) " +

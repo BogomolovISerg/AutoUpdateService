@@ -19,8 +19,9 @@
 </div>
 
 <div class="container">
-    <div class="grid">
-        <div class="card col-6">
+
+    <div class="dashboard-top">
+        <div class="card dashboard-summary-card" id="dashboard-summary-card">
             <h3>Автообновление</h3>
             <p>Статус: <b th:text="${settings.autoUpdateEnabled} ? 'Включено' : 'Выключено'">Включено</b></p>
             <p>Следующая дата: <b th:text="${settings.nextRunDate} ?: '-'">-</b></p>
@@ -28,27 +29,43 @@
             <p>Новые задачи в очереди: <b th:text="${pendingNewCount}">0</b></p>
             <a class="btn" href="/settings">Открыть настройки</a>
         </div>
-        <div class="card col-6">
-            <h3>Последние прогоны</h3>
-            <table class="table  dashboard-table">
-                <thead><tr><th>запланировано</th><th>статус</th><th>ошибка</th></tr></thead>
-                <tbody>
-                <tr th:each="r : ${recentRuns}">
-                    <td th:text="${r.plannedFor}">—</td>
-                    <td th:text="${r.status}">—</td>
-                    <td th:text="${r.errorSummary}">—</td>
-                </tr>
-                </tbody>
-            </table>
+
+        <div class="card dashboard-runs-card" id="dashboard-runs-card">
+            <h3 id="dashboard-runs-title">Последние прогоны</h3>
+
+            <div class="dashboard-runs-wrap" id="dashboard-runs-wrap">
+                <table class="table dashboard-runs-table">
+                    <thead>
+                    <tr>
+                        <th>запланировано</th>
+                        <th>статус</th>
+                        <th>ошибка</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="r : ${recentRuns}">
+                        <td th:text="${plannedForFmt[r.id]} ?: '—'">—</td>
+                        <td th:text="${r.status}">—</td>
+                        <td class="wrap" th:text="${r.errorSummary}">—</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
     <div class="card">
         <h3>Последние задачи</h3>
-        <table class="table  dashboard-table">
+        <table class="table dashboard-table">
             <thead>
             <tr>
-                <th>создано</th><th>проект</th><th>ветка</th><th>расш.</th><th>запланировано</th><th>автор</th><th>комментарий</th>
+                <th>создано</th>
+                <th>проект</th>
+                <th>ветка</th>
+                <th>расш.</th>
+                <th>запланировано</th>
+                <th>автор</th>
+                <th>комментарий</th>
             </tr>
             </thead>
             <tbody>
@@ -58,7 +75,8 @@
                 <td th:text="${t.targetType}">—</td>
                 <td th:text="${t.extensionName} ?: '—'">—</td>
                 <td th:text="${t.scheduledFor}">—</td>
-                <td th:text="${#strings.isEmpty(t.authorName) ? ( #strings.isEmpty(t.authorLogin) ? '—' : t.authorLogin ) : t.authorName}" th:title="${t.authorLogin}">—</td>
+                <td th:text="${#strings.isEmpty(t.authorName) ? ( #strings.isEmpty(t.authorLogin) ? '—' : t.authorLogin ) : t.authorName}"
+                    th:title="${t.authorLogin}">—</td>
                 <td class="wrap" th:text="${t.comment}">—</td>
             </tr>
             </tbody>
@@ -66,5 +84,67 @@
         <p class="small">Полный список на странице «Очередь».</p>
     </div>
 </div>
+
+<script>
+    (function () {
+        function syncDashboardRunsHeight() {
+            var summaryCard = document.getElementById('dashboard-summary-card');
+            var runsCard = document.getElementById('dashboard-runs-card');
+            var runsWrap = document.getElementById('dashboard-runs-wrap');
+            var title = document.getElementById('dashboard-runs-title');
+
+            if (!summaryCard || !runsCard || !runsWrap || !title) {
+                return;
+            }
+
+            runsCard.style.height = '';
+            runsWrap.style.height = '';
+            runsWrap.style.maxHeight = '';
+
+            if (window.innerWidth <= 900) {
+                return;
+            }
+
+            var summaryHeight = Math.ceil(summaryCard.getBoundingClientRect().height);
+            if (!summaryHeight || summaryHeight < 100) {
+                return;
+            }
+
+            runsCard.style.height = summaryHeight + 'px';
+
+            var runsStyle = window.getComputedStyle(runsCard);
+            var paddingTop = parseFloat(runsStyle.paddingTop || '0');
+            var paddingBottom = parseFloat(runsStyle.paddingBottom || '0');
+            var titleHeight = Math.ceil(title.getBoundingClientRect().height);
+            var titleMarginBottom = parseFloat(window.getComputedStyle(title).marginBottom || '0');
+
+            var availableHeight = Math.max(
+                120,
+                summaryHeight - paddingTop - paddingBottom - titleHeight - titleMarginBottom
+            );
+
+            runsWrap.style.height = availableHeight + 'px';
+            runsWrap.style.maxHeight = availableHeight + 'px';
+        }
+
+        window.addEventListener('DOMContentLoaded', function () {
+            syncDashboardRunsHeight();
+            setTimeout(syncDashboardRunsHeight, 0);
+            setTimeout(syncDashboardRunsHeight, 150);
+        });
+
+        window.addEventListener('load', syncDashboardRunsHeight);
+        window.addEventListener('resize', syncDashboardRunsHeight);
+
+        if (window.ResizeObserver) {
+            var summaryCard = document.getElementById('dashboard-summary-card');
+            if (summaryCard) {
+                new ResizeObserver(function () {
+                    syncDashboardRunsHeight();
+                }).observe(summaryCard);
+            }
+        }
+    })();
+</script>
 </body>
 </html>

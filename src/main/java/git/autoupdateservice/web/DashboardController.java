@@ -9,9 +9,17 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 @Controller
 @RequiredArgsConstructor
 public class DashboardController {
+
+    private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
 
     private final SettingsService settingsService;
     private final UpdateTaskRepository updateTaskRepository;
@@ -19,12 +27,34 @@ public class DashboardController {
 
     @GetMapping("/")
     public String dashboard(Model model, Authentication auth) {
-        model.addAttribute("settings", settingsService.get());
+        var settings = settingsService.get();
+        var recentRuns = executionRunRepository.findAll().stream()
+                .sorted((a, b) -> b.getPlannedFor().compareTo(a.getPlannedFor()))
+                .limit(20)
+                .toList();
+
+        ZoneId zone;
+        try {
+            zone = ZoneId.of(settings.getTimezone());
+        } catch (Exception e) {
+            zone = ZoneId.systemDefault();
+        }
+
+        Map<UUID, String> plannedForFmt = new HashMap<>();
+        for (var r : recentRuns) {
+            if (r.getId() != null && r.getPlannedFor() != null) {
+                plannedForFmt.put(
+                        r.getId(),
+                        r.getPlannedFor().atZoneSameInstant(zone).format(TS_FMT)
+                );
+            }
+        }
+
+        model.addAttribute("settings", settings);
         model.addAttribute("pendingNewCount", updateTaskRepository.countByStatus(git.autoupdateservice.domain.TaskStatus.NEW));
         model.addAttribute("recentNewTasks", updateTaskRepository.findTop200ByStatusOrderByCreatedAtDesc(git.autoupdateservice.domain.TaskStatus.NEW));
-        model.addAttribute("recentRuns", executionRunRepository.findAll().stream()
-                .sorted((a,b) -> b.getPlannedFor().compareTo(a.getPlannedFor()))
-                .limit(20).toList());
+        model.addAttribute("recentRuns", recentRuns);
+        model.addAttribute("plannedForFmt", plannedForFmt);
         model.addAttribute("actor", auth != null ? auth.getName() : "anonymous");
         return "dashboard";
     }

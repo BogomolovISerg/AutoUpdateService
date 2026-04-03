@@ -4,6 +4,7 @@ import git.autoupdateservice.domain.*;
 import git.autoupdateservice.repo.LogEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import git.autoupdateservice.util.PasswordMasker;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -48,8 +49,8 @@ public class AuditLogService {
         e.setTs(OffsetDateTime.now());
         e.setType(type);
         e.setLevel(level);
-        e.setMessage(message);
-        e.setData(normalizeJson(dataJson));
+        e.setMessage(PasswordMasker.maskText(message));
+        e.setData(normalizeJson(PasswordMasker.maskText(dataJson)));
         e.setClientIp(clientIp);
         e.setActor(actor);
         e.setRunId(runId);
@@ -61,8 +62,8 @@ public class AuditLogService {
         e.setTs(OffsetDateTime.now());
         e.setType(type);
         e.setLevel(level);
-        e.setMessage(message);
-        e.setData(normalizeJson(dataJson));
+        e.setMessage(PasswordMasker.maskText(message));
+        e.setData(normalizeJson(PasswordMasker.maskText(dataJson)));
         e.setClientIp(clientIp);
         e.setActor(actor);
         e.setRunId(runId);
