@@ -158,8 +158,17 @@ public class UpdateExecutor {
                     .toList();
 
             try {
-                for (RunStepDef sd : normalSteps) {
-                    executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                //for (RunStepDef sd : normalSteps) {
+                //    executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                if (!normalSteps.isEmpty()) {
+                                        RunStepDef firstStep = normalSteps.get(0);
+                                        executeFirstStepWithRetry(run, s, firstStep, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+
+                                                for (int i = 1; i < normalSteps.size(); i++) {
+                                                RunStepDef sd = normalSteps.get(i);
+                                                executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                                            }
+
                 }
 
                 OffsetDateTime now = OffsetDateTime.now();
@@ -204,6 +213,65 @@ public class UpdateExecutor {
         }
     }
 
+    private void executeFirstStepWithRetry(
+            ExecutionRun run,
+            Settings s,
+            RunStepDef firstStep,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            List<String> extensions,
+            Path runDir,
+            Path workDir
+    ) throws Exception {
+
+                        final int maxAttempts = 3;
+                final int sleepSeconds = Math.max(1, s.getClosedSleepSeconds());
+                Exception lastError = null;
+
+                        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                        try {
+                                if (attempt > 1) {
+                                        auditLogService.info(
+                                                        LogType.RUN_STARTED,
+                                                        "Retrying run after first step failure. Attempt " + attempt + "/" + maxAttempts,
+                                                        "{\"stepCode\":" + j(firstStep.getCode()) + ",\"attempt\":" + attempt + ",\"maxAttempts\":" + maxAttempts + "}",
+                                                        null,
+                                                        "system",
+                                                        run.getId()
+                                                        );
+                                    }
+
+                                        executePlannedStep(run, s, firstStep, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                                return;
+                            } catch (Exception e) {
+                                lastError = e;
+                                if (attempt >= maxAttempts) {
+                                        throw e;
+                                    }
+
+                                        auditLogService.warn(
+                                                        LogType.STEP_FAILED,
+                                                        "First step failed, waiting before retry: " + e.getMessage(),
+                                                        "{\"stepCode\":" + j(firstStep.getCode()) + ",\"attempt\":" + attempt + ",\"maxAttempts\":" + maxAttempts + ",\"sleepSeconds\":" + sleepSeconds + ",\"error\":" + j(String.valueOf(e.getMessage())) + "}",
+                                                        null,
+                                                        "system",
+                                                        run.getId()
+                                                        );
+
+                                        try {
+                                        Thread.sleep(sleepSeconds * 1000L);
+                                    } catch (InterruptedException ie) {
+                                        Thread.currentThread().interrupt();
+                                        throw ie;
+                                    }
+                            }
+                    }
+
+                        if (lastError != null) {
+                        throw lastError;
+        }
+    }
     private void executePlannedStep(
             ExecutionRun run,
             Settings s,

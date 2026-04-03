@@ -44,6 +44,21 @@
                 <a class="btn secondary" href="/queue">Сброс</a>
             </div>
         </form>
+        <div class="pager" style="margin-top:12px;">
+                        <a class="btn secondary"
+                                           th:if="${page > 1}"
+                                           th:href="@{/queue(page=${page - 1}, from=${from}, to=${to}, status=${status})}">← Назад</a>
+
+                        <span class="small">
+                Стр. <b th:text="${page}">1</b> из <b th:text="${totalPages}">1</b>
+                · всего <b th:text="${totalElements}">0</b>
+                · по <b th:text="${pageSize}">50</b>
+            </span>
+
+                        <a class="btn secondary"
+                                           th:if="${page < totalPages}"
+                                           th:href="@{/queue(page=${page + 1}, from=${from}, to=${to}, status=${status})}">Вперёд →</a>
+                    </div>
 
         <hr/>
 
@@ -96,22 +111,6 @@
                 </tr>
                 </tbody>
             </table>
-        </div>
-
-        <div class="pager" th:if="${totalPages != null and totalPages > 1}" style="margin-top:12px;">
-            <a class="btn secondary"
-               th:if="${page > 1}"
-               th:href="@{/queue(page=${page - 1}, from=${from}, to=${to}, status=${status})}">← Назад</a>
-
-            <span class="small">
-                Стр. <b th:text="${page}">1</b> из <b th:text="${totalPages}">1</b>
-                · всего <b th:text="${totalElements}">0</b>
-                · по <b th:text="${pageSize}">50</b>
-            </span>
-
-            <a class="btn secondary"
-               th:if="${page < totalPages}"
-               th:href="@{/queue(page=${page + 1}, from=${from}, to=${to}, status=${status})}">Вперёд →</a>
         </div>
     </div>
 </div>
