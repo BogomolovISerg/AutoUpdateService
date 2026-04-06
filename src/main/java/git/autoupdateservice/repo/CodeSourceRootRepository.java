@@ -12,4 +12,5 @@ public interface CodeSourceRootRepository extends JpaRepository<CodeSourceRoot, 
     Optional<CodeSourceRoot> findFirstBySourceKindAndEnabledIsTrue(SourceKind sourceKind);
     Optional<CodeSourceRoot> findFirstBySourceKindOrderByUpdatedAtDesc(SourceKind sourceKind);
     List<CodeSourceRoot> findAllByEnabledIsTrueOrderByPriorityAscSourceNameAsc();
+    List<CodeSourceRoot> findAllBySourceKindAndEnabledIsTrueOrderByPriorityAscSourceNameAsc(SourceKind sourceKind);
 }

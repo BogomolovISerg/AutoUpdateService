@@ -3,8 +3,6 @@ package git.autoupdateservice.service;
 import git.autoupdateservice.domain.DependencyCallerType;
 import lombok.Builder;
 import lombok.Value;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -32,9 +30,15 @@ public class BslDependencyParser {
 
     private static final Pattern LOCAL_CALL =
             Pattern.compile("(?iu)(?<![\\p{L}\\p{N}_#])([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(");
+
     private static final Pattern EXPORT_WORD =
-          //  Pattern.compile("(?iu)\\bЭкспорт\\b");
-           Pattern.compile("(?iu)(?<!\\p{L})Экспорт(?!\\p{L})");
+            Pattern.compile("(?iu)(?<!\\p{L})Экспорт(?!\\p{L})");
+
+    private static final Pattern CONTINUE_CALL =
+            Pattern.compile("(?iu)(?<![\\p{L}\\p{N}_#])ПродолжитьВызов\\s*\\(");
+
+    private static final Pattern ANNOTATION_WITH_TARGET =
+            Pattern.compile("(?iu)^\\s*&\\s*([\\p{L}_#][\\p{L}\\p{N}_#]*)\\s*\\(\\s*\"([^\"]+)\"");
 
     private static final Set<String> RESERVED_WORDS = Set.of(
             "если", "тогда", "иначе", "иначеесли", "конецесли",
@@ -44,7 +48,6 @@ public class BslDependencyParser {
     );
 
     private final OneCNameDecoder oneCNameDecoder;
-    private static final Logger log = LoggerFactory.getLogger(BslDependencyParser.class);
 
     public BslDependencyParser(OneCNameDecoder oneCNameDecoder) {
         this.oneCNameDecoder = oneCNameDecoder;
@@ -61,9 +64,6 @@ public class BslDependencyParser {
         String decodedRel = oneCNameDecoder.decodePath(rel);
 
         ParsedOwner owner = determineOwner(decodedRel);
-
-        boolean debugModule = owner != null && "CRMЛокализация".equals(owner.callerName());
-
         if (owner == null || owner.callerType() != DependencyCallerType.COMMON_MODULE) {
             return null;
         }
@@ -71,27 +71,18 @@ public class BslDependencyParser {
         List<MemberBlock> memberBlocks = extractMemberBlocks(fileText);
         Map<String, String> localMembersByLower = new HashMap<>();
         List<MemberDefinition> members = new ArrayList<>();
+
         for (MemberBlock block : memberBlocks) {
-
-            if (debugModule) {
-                String preview = block.body() == null ? "" : block.body().replace('\n', ' ');
-                if (preview.length() > 300) {
-                    preview = preview.substring(0, 300);
-                }
-
-             /*   log.info("[BSL-BLOCK-CHECK] module={} | member={} | exported={} | bodyLength={} | bodyPreview={}",
-                        owner.callerName(),
-                        block.memberName(),
-                        block.exported(),
-                        block.body() == null ? 0 : block.body().length(),
-                        preview);*/
-            }
-
             localMembersByLower.put(block.memberName().toLowerCase(Locale.ROOT), block.memberName());
             members.add(MemberDefinition.builder()
                     .moduleName(owner.callerName())
                     .memberName(block.memberName())
+                    .effectiveMemberName(block.effectiveMemberName())
                     .exported(block.exported())
+                    .extensionHook(block.extensionHook())
+                    .annotationName(block.annotationName())
+                    .annotationMode(block.annotationMode())
+                    .continueCall(block.continueCall())
                     .fullName(owner.callerName() + "." + block.memberName())
                     .build());
         }
@@ -106,12 +97,6 @@ public class BslDependencyParser {
             collectQualifiedCalls(decodedRel, owner.callerName(), block.memberName(), block.body(), commonModulesByLower, dedup, calls);
             collectLocalCalls(decodedRel, owner.callerName(), block.memberName(), block.body(), localMembersByLower, excludedLower, dedup, calls);
         }
-
-      /*  log.info("[BSL-PARSER-CHECK] module={} | members={} | exports={} | calls={}",
-                owner.callerName(),
-                members.stream().map(MemberDefinition::getMemberName).toList(),
-                members.stream().filter(MemberDefinition::isExported).map(MemberDefinition::getMemberName).toList(),
-                calls.size());*/
 
         return ParsedCommonModule.builder()
                 .moduleName(owner.callerName())
@@ -136,7 +121,6 @@ public class BslDependencyParser {
         }
 
         String stripped = stripComments(fileText);
-        int debugCount = 0;
         Matcher matcher = QUALIFIED_CALL.matcher(stripped);
         List<ObjectExportUsage> usages = new ArrayList<>();
         Set<String> dedup = new LinkedHashSet<>();
@@ -145,19 +129,12 @@ public class BslDependencyParser {
             String module = matcher.group(1);
             String member = matcher.group(2);
 
-            /*if (debugCount < 20) {
-                log.info("[BSL-OBJECT-CALL] object={} | path={} | call={}.{}",
-                        owner.callerName(), decodedRel, module, member);
-                debugCount++;
-            }*/
-
             Set<String> exportMembers = exportMembersByModule.get(module.toLowerCase(Locale.ROOT));
             if (exportMembers == null || !exportMembers.contains(member.toLowerCase(Locale.ROOT))) {
                 continue;
             }
 
             String key = owner.callerType() + "|" + owner.callerName() + "|" + decodedRel + "|" + module + "|" + member;
-
             if (!dedup.add(key)) {
                 continue;
             }
@@ -188,6 +165,7 @@ public class BslDependencyParser {
             }
 
             String memberName = start.group(2);
+            AnnotationInfo annotationInfo = extractAnnotationInfo(lines, i);
 
             StringBuilder header = new StringBuilder();
             int j = i;
@@ -215,13 +193,7 @@ public class BslDependencyParser {
                 j++;
             }
 
-            String headerText = header.toString();
-            boolean exported = EXPORT_WORD.matcher(headerText).find();
-
-          /*  log.info("[BSL-EXPORT-CHECK] member={} | exported={} | header={}",
-                    memberName,
-                    exported,
-                    headerText.replace('\n', ' '));*/
+            boolean exported = EXPORT_WORD.matcher(header.toString()).find();
 
             StringBuilder body = new StringBuilder();
             j++;
@@ -230,7 +202,22 @@ public class BslDependencyParser {
                 String bodyLine = stripComment(lines[j]);
                 Matcher end = END_MEMBER.matcher(bodyLine);
                 if (end.find()) {
-                    result.add(new MemberBlock(memberName, body.toString(), exported));
+                    String bodyText = body.toString();
+                    boolean continueCall = CONTINUE_CALL.matcher(bodyText).find();
+                    String effectiveMemberName = annotationInfo.targetMemberName() == null || annotationInfo.targetMemberName().isBlank()
+                            ? memberName
+                            : annotationInfo.targetMemberName();
+
+                    result.add(new MemberBlock(
+                            memberName,
+                            effectiveMemberName,
+                            bodyText,
+                            exported,
+                            annotationInfo.annotationName(),
+                            annotationInfo.annotationMode(),
+                            annotationInfo.targetMemberName() != null && !annotationInfo.targetMemberName().isBlank(),
+                            continueCall
+                    ));
                     i = j;
                     break;
                 }
@@ -240,6 +227,39 @@ public class BslDependencyParser {
         }
 
         return result;
+    }
+
+    private AnnotationInfo extractAnnotationInfo(String[] lines, int memberStartLine) {
+        for (int i = memberStartLine - 1; i >= 0; i--) {
+            String line = stripComment(lines[i]).trim();
+            if (line.isBlank()) {
+                break;
+            }
+            if (!line.startsWith("&")) {
+                break;
+            }
+
+            Matcher matcher = ANNOTATION_WITH_TARGET.matcher(line);
+            if (matcher.find()) {
+                String annotationName = matcher.group(1);
+                String targetMemberName = matcher.group(2) == null ? null : matcher.group(2).trim();
+                return new AnnotationInfo(annotationName, mapAnnotationMode(annotationName), targetMemberName);
+            }
+        }
+        return new AnnotationInfo(null, AnnotationMode.NONE, null);
+    }
+
+    private AnnotationMode mapAnnotationMode(String annotationName) {
+        if (annotationName == null || annotationName.isBlank()) {
+            return AnnotationMode.NONE;
+        }
+        String normalized = annotationName.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "вместо" -> AnnotationMode.INSTEAD;
+            case "после" -> AnnotationMode.AFTER;
+            case "перед" -> AnnotationMode.BEFORE;
+            default -> AnnotationMode.OTHER;
+        };
     }
 
     private void collectQualifiedCalls(
@@ -256,25 +276,10 @@ public class BslDependencyParser {
             String left = matcher.group(1);
             String right = matcher.group(2);
             String calleeModule = commonModulesByLower.get(left.toLowerCase(Locale.ROOT));
-
-           /* if ("CRMЛокализация".equals(moduleName)) {
-                log.info("[BSL-QUALIFIED-CANDIDATE] module={} | currentMember={} | left={} | right={}",
-                        moduleName, currentMember, left, right);
-            }*/
-
             if (calleeModule == null) {
-               /* if ("CRMЛокализация".equals(moduleName)) {
-                    log.info("[BSL-QUALIFIED-SKIP] module={} | currentMember={} | left={} | right={} | reason=module-not-in-knownCommonModules",
-                            moduleName, currentMember, left, right);
-                }*/
-
                 continue;
             }
-            /*if ("CRMЛокализация".equals(moduleName)) {
-                log.info("[BSL-QUALIFIED-ACCEPT] module={} | currentMember={} | calleeModule={} | calleeMember={}",
-                        moduleName, currentMember, calleeModule, right);
-            }*/
-            addCall(decodedRel, moduleName, currentMember, calleeModule, right, dedup, calls);
+            addCall(decodedRel, moduleName, currentMember, calleeModule, right, true, dedup, calls);
         }
     }
 
@@ -298,41 +303,19 @@ public class BslDependencyParser {
             String candidate = matcher.group(1);
             String candidateLower = candidate.toLowerCase(Locale.ROOT);
 
-          /*  if ("CRMЛокализация".equals(moduleName)) {
-                log.info("[BSL-LOCAL-CANDIDATE] module={} | currentMember={} | candidate={}",
-                        moduleName, currentMember, candidate);
-            }*/
-
             if (RESERVED_WORDS.contains(candidateLower) || excludedLower.contains(candidateLower)) {
-               /* if ("CRMЛокализация".equals(moduleName)) {
-                    log.info("[BSL-LOCAL-SKIP] module={} | currentMember={} | candidate={} | reason=reserved-or-excluded",
-                            moduleName, currentMember, candidate);
-                }*/
                 continue;
             }
 
             String canonicalMember = localMembersByLower.get(candidateLower);
             if (canonicalMember == null) {
-                /*if ("CRMЛокализация".equals(moduleName)) {
-                    log.info("[BSL-LOCAL-SKIP] module={} | currentMember={} | candidate={} | reason=not-found-in-local-members",
-                            moduleName, currentMember, candidate);
-                }*/
                 continue;
             }
             if (currentMember != null && candidateLower.equals(currentMember.toLowerCase(Locale.ROOT))) {
-                /*if ("CRMЛокализация".equals(moduleName)) {
-                    log.info("[BSL-LOCAL-SKIP] module={} | currentMember={} | candidate={} | reason=self-call",
-                            moduleName, currentMember, candidate);
-                }*/
                 continue;
             }
 
-            /*if ("CRMЛокализация".equals(moduleName)) {
-                log.info("[BSL-LOCAL-ACCEPT] module={} | currentMember={} | candidate={} | canonical={}",
-                        moduleName, currentMember, candidate, canonicalMember);
-            }*/
-
-            addCall(decodedRel, moduleName, currentMember, moduleName, canonicalMember, dedup, calls);
+            addCall(decodedRel, moduleName, currentMember, moduleName, canonicalMember, false, dedup, calls);
         }
     }
 
@@ -342,28 +325,12 @@ public class BslDependencyParser {
             String callerMember,
             String calleeModule,
             String calleeMember,
+            boolean logicalCall,
             Set<String> dedup,
             List<ModuleCall> calls
     ) {
-        String key = callerModule + "|" + nvl(callerMember) + "|" + calleeModule + "|" + nvl(calleeMember) + "|" + decodedRel;
-        boolean debugModule = "CRMЛокализация".equals(callerModule);
-        /*if (debugModule) {
-            log.info("[BSL-ADD-CALL-TRY] callerModule={} | callerMember={} | calleeModule={} | calleeMember={} | key={}",
-                    callerModule,
-                    callerMember,
-                    calleeModule,
-                    calleeMember,
-                    key);
-        }*/
-
+        String key = callerModule + "|" + nvl(callerMember) + "|" + calleeModule + "|" + nvl(calleeMember) + "|" + logicalCall + "|" + decodedRel;
         if (!dedup.add(key)) {
-           /* if (debugModule) {
-                log.info("[BSL-ADD-CALL-SKIP] callerModule={} | callerMember={} | calleeModule={} | calleeMember={} | reason=duplicate",
-                        callerModule,
-                        callerMember,
-                        calleeModule,
-                        calleeMember);
-            }*/
             return;
         }
 
@@ -372,15 +339,9 @@ public class BslDependencyParser {
                 .callerMember(callerMember)
                 .calleeModule(calleeModule)
                 .calleeMember(calleeMember)
+                .logicalCall(logicalCall)
                 .sourcePath(decodedRel)
                 .build());
-        /*if (debugModule) {
-            log.info("[BSL-ADD-CALL-ACCEPT] callerModule={} | callerMember={} | calleeModule={} | calleeMember={}",
-                    callerModule,
-                    callerMember,
-                    calleeModule,
-                    calleeMember);
-        }*/
     }
 
     private ParsedOwner determineOwner(String decodedRel) {
@@ -483,15 +444,43 @@ public class BslDependencyParser {
         return s == null ? "" : s;
     }
 
-    private record ParsedOwner(DependencyCallerType callerType, String callerName) {}
-    private record MemberBlock(String memberName, String body, boolean exported) {}
+    private record ParsedOwner(DependencyCallerType callerType, String callerName) {
+    }
+
+    private record AnnotationInfo(String annotationName, AnnotationMode annotationMode, String targetMemberName) {
+    }
+
+    private record MemberBlock(
+            String memberName,
+            String effectiveMemberName,
+            String body,
+            boolean exported,
+            String annotationName,
+            AnnotationMode annotationMode,
+            boolean extensionHook,
+            boolean continueCall
+    ) {
+    }
+
+    public enum AnnotationMode {
+        NONE,
+        BEFORE,
+        AFTER,
+        INSTEAD,
+        OTHER
+    }
 
     @Value
     @Builder
     public static class MemberDefinition {
         String moduleName;
         String memberName;
+        String effectiveMemberName;
         boolean exported;
+        boolean extensionHook;
+        String annotationName;
+        AnnotationMode annotationMode;
+        boolean continueCall;
         String fullName;
     }
 
@@ -502,6 +491,7 @@ public class BslDependencyParser {
         String callerMember;
         String calleeModule;
         String calleeMember;
+        boolean logicalCall;
         String sourcePath;
     }
 

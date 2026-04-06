@@ -21,6 +21,13 @@ public class CommonModuleImpact {
     @JoinColumn(name = "snapshot_id", nullable = false)
     private DependencySnapshot snapshot;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_kind", length = 20)
+    private SourceKind sourceKind = SourceKind.BASE;
+
+    @Column(name = "source_name", length = 200)
+    private String sourceName = "Основная конфигурация";
+
     @Column(name = "common_module_name", nullable = false, length = 255)
     private String commonModuleName;
 

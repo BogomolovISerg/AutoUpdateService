@@ -27,6 +27,8 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
 
     @Query(value = """
             select
+                coalesce(nullif(btrim(c.source_kind), ''), 'BASE') as sourceKind,
+                coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') as sourceName,
                 c.common_module_name as commonModuleName,
                 count(distinct c.common_module_member_name) as methodCount,
                 count(distinct (coalesce(c.object_type, '') || '|' || coalesce(c.object_name, ''))) as objectCount
@@ -34,8 +36,12 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
             where c.snapshot_id = :snapshotId
               and (:q is null or lower(c.common_module_name) like :q)
               and (:objectType is null or c.object_type = :objectType)
-            group by c.common_module_name
-            order by c.common_module_name
+            group by coalesce(nullif(btrim(c.source_kind), ''), 'BASE'),
+                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация'),
+                     c.common_module_name
+            order by c.common_module_name,
+                     case when coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = 'BASE' then 0 else 1 end,
+                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация')
             limit :limit offset :offset
             """, nativeQuery = true)
     List<ModuleAggRow> findModuleNodes(
@@ -47,11 +53,26 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
     );
 
     @Query(value = """
+            select count(distinct (coalesce(nullif(btrim(c.source_kind), ''), 'BASE') || '|' || coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') || '|' || c.common_module_name))
+            from common_module_impact c
+            where c.snapshot_id = :snapshotId
+              and (:q is null or lower(c.common_module_name) like :q)
+              and (:objectType is null or c.object_type = :objectType)
+            """, nativeQuery = true)
+    long countModuleNodes(
+            @Param("snapshotId") UUID snapshotId,
+            @Param("q") String q,
+            @Param("objectType") String objectType
+    );
+
+    @Query(value = """
             select
                 c.common_module_member_name as commonModuleMemberName,
                 count(distinct (coalesce(c.object_type, '') || '|' || coalesce(c.object_name, ''))) as objectCount
             from common_module_impact c
             where c.snapshot_id = :snapshotId
+              and coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = :sourceKind
+              and coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') = :sourceName
               and c.common_module_name = :moduleName
               and c.common_module_member_name is not null
               and c.common_module_member_name <> ''
@@ -61,6 +82,8 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
             """, nativeQuery = true)
     List<MethodAggRow> findMethodNodes(
             @Param("snapshotId") UUID snapshotId,
+            @Param("sourceKind") String sourceKind,
+            @Param("sourceName") String sourceName,
             @Param("moduleName") String moduleName,
             @Param("objectType") String objectType
     );
@@ -71,6 +94,8 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
                 c.object_name as objectName
             from common_module_impact c
             where c.snapshot_id = :snapshotId
+              and coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = :sourceKind
+              and coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') = :sourceName
               and c.common_module_name = :moduleName
               and c.common_module_member_name = :methodName
               and (:objectType is null or c.object_type = :objectType)
@@ -78,12 +103,16 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
             """, nativeQuery = true)
     List<ObjectRow> findObjectNodes(
             @Param("snapshotId") UUID snapshotId,
+            @Param("sourceKind") String sourceKind,
+            @Param("sourceName") String sourceName,
             @Param("moduleName") String moduleName,
             @Param("methodName") String methodName,
             @Param("objectType") String objectType
     );
 
     interface ModuleAggRow {
+        String getSourceKind();
+        String getSourceName();
         String getCommonModuleName();
         Integer getMethodCount();
         Integer getObjectCount();

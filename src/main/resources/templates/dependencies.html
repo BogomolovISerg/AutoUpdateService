@@ -7,7 +7,8 @@
 </head>
 <script>
     let treeOffset = 0;
-    let treeLimit = 50;
+    let treeLimit = 100;
+    let treeTotal = null;
 
     function esc(s) {
         return (s ?? '')
@@ -24,6 +25,60 @@
         };
     }
 
+    function updateMoreButton() {
+        const btn = document.getElementById('treeLoadMoreBtn');
+        if (!btn) return;
+
+        const allLoaded = treeTotal !== null && treeOffset >= treeTotal;
+        btn.disabled = allLoaded;
+        btn.textContent = allLoaded ? 'Все загружено' : 'Еще';
+    }
+
+    function updateTreeStatus() {
+        const status = document.getElementById('treeStatus');
+        if (!status) return;
+
+        if (treeTotal === null) {
+            status.textContent = 'Загрузка модулей...';
+            return;
+        }
+
+        if (treeTotal === 0) {
+            status.textContent = 'Данных нет';
+            return;
+        }
+
+        let text = 'Показано модулей: ' + treeOffset + ' из ' + treeTotal;
+        if (treeOffset < treeTotal) {
+            text += '. Нажмите "Еще" для следующей порции.';
+        } else {
+            text += '. Загружен весь список.';
+        }
+        status.textContent = text;
+    }
+
+    async function loadModuleCount() {
+        const f = currentFilters();
+        const params = new URLSearchParams();
+        if (f.q) params.set('q', f.q);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/modules/count?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            treeTotal = null;
+            updateTreeStatus();
+            return;
+        }
+
+        const data = await resp.json();
+        treeTotal = Number(data.total ?? 0);
+        updateTreeStatus();
+        updateMoreButton();
+    }
+
     async function loadModules(reset) {
         const root = document.getElementById('treeRoot');
         const status = document.getElementById('treeStatus');
@@ -31,7 +86,13 @@
 
         if (reset) {
             treeOffset = 0;
+            treeTotal = null;
             root.innerHTML = '';
+            updateMoreButton();
+            await loadModuleCount();
+            if (treeTotal === 0) {
+                return;
+            }
         }
 
         status.textContent = 'Загрузка модулей...';
@@ -54,12 +115,15 @@
         const data = await resp.json();
 
         if (reset && data.length === 0) {
-            status.textContent = 'Данных нет';
+            treeTotal = 0;
+            updateTreeStatus();
+            updateMoreButton();
             return;
         }
 
         if (data.length === 0) {
-            status.textContent = 'Больше данных нет';
+            updateTreeStatus();
+            updateMoreButton();
             return;
         }
 
@@ -68,9 +132,12 @@
             const html = `
                 <details class="tree-module" style="margin-bottom:8px; border:1px solid #ddd; border-radius:8px; padding:8px;"
                          data-module-name="${esc(item.commonModuleName)}"
+                         data-source-kind="${esc(item.sourceKind)}"
+                         data-source-name="${esc(item.sourceName)}"
                          ontoggle="onModuleToggle(this)">
                     <summary style="cursor:pointer;">
                         <b>${esc(item.commonModuleName)}</b>
+                        ${item.sourceKind === 'EXTENSION' ? `<span class="small">[${esc(item.sourceName)}]</span>` : ''}
                         <span class="small">(${item.methodCount ?? 0} методов, ${item.objectCount ?? 0} объектов)</span>
                     </summary>
                     <div id="${moduleId}" class="module-children" style="padding-left:16px; margin-top:8px;"></div>
@@ -80,7 +147,8 @@
         }
 
         treeOffset += data.length;
-        status.textContent = 'Загружено модулей: ' + treeOffset;
+        updateTreeStatus();
+        updateMoreButton();
     }
 
     async function onModuleToggle(detailsEl) {
@@ -90,12 +158,16 @@
         if (container.dataset.loaded === '1') return;
 
         const moduleName = detailsEl.dataset.moduleName;
+        const sourceKind = detailsEl.dataset.sourceKind;
+        const sourceName = detailsEl.dataset.sourceName;
         const f = currentFilters();
 
         container.innerHTML = '<div class="small">Загрузка методов...</div>';
 
         const params = new URLSearchParams();
         params.set('moduleName', moduleName);
+        params.set('sourceKind', sourceKind);
+        params.set('sourceName', sourceName);
         if (f.objectType) params.set('objectType', f.objectType);
 
         const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
@@ -123,6 +195,8 @@
             const html = `
                 <details class="tree-method" style="margin-bottom:6px;"
                          data-module-name="${esc(moduleName)}"
+                         data-source-kind="${esc(sourceKind)}"
+                         data-source-name="${esc(sourceName)}"
                          data-method-name="${esc(item.methodName)}"
                          ontoggle="onMethodToggle(this)">
                     <summary style="cursor:pointer;">
@@ -145,6 +219,8 @@
         if (container.dataset.loaded === '1') return;
 
         const moduleName = detailsEl.dataset.moduleName;
+        const sourceKind = detailsEl.dataset.sourceKind;
+        const sourceName = detailsEl.dataset.sourceName;
         const methodName = detailsEl.dataset.methodName;
         const f = currentFilters();
 
@@ -152,6 +228,8 @@
 
         const params = new URLSearchParams();
         params.set('moduleName', moduleName);
+        params.set('sourceKind', sourceKind);
+        params.set('sourceName', sourceName);
         params.set('methodName', methodName);
         if (f.objectType) params.set('objectType', f.objectType);
 
@@ -231,6 +309,28 @@
             </div>
         </form>
 
+        <div class="card" th:if="${extensionSources != null and !#lists.isEmpty(extensionSources)}" style="margin-top:12px;">
+            <h3>Подключенные расширения</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Путь</th>
+                        <th>Приоритет</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr th:each="ext : ${extensionSources}">
+                        <td th:text="${ext.sourceName}">Расширение</td>
+                        <td class="wrap" th:text="${ext.rootPath}">src</td>
+                        <td th:text="${ext.priority}">0</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <form method="post" th:action="@{/dependencies/rebuild}" style="margin-top:12px;">
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
             <button class="btn secondary" type="submit">Полное сканирование</button>
@@ -309,35 +409,6 @@
             </div>
         </div>
 
-        <div class="card" style="margin-top:12px;">
-            <h3>Журнал сканирования</h3>
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                    <tr>
-                        <th>Время</th>
-                        <th>Уровень</th>
-                        <th>Этап</th>
-                        <th>Путь</th>
-                        <th>Сообщение</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr th:if="${#lists.isEmpty(scanLogs)}">
-                        <td colspan="5" class="small">Записей нет</td>
-                    </tr>
-                    <tr th:each="r : ${scanLogs}">
-                        <td th:text="${scanLogCreatedAtFmt[T(java.lang.String).valueOf(r.id)]} ?: '—'">01.04.2026 10:00:00</td>
-                        <td th:text="${r.level}">INFO</td>
-                        <td th:text="${r.phase}">READ_FILE_OK</td>
-                        <td class="wrap" th:text="${r.sourcePath} ?: '—'">CommonModules/...</td>
-                        <td class="wrap" th:text="${r.message}">Сообщение</td>
-                    </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
         <form id="treeSearchForm" method="get" th:action="@{/dependencies}" class="row" style="margin-top:12px;">
             <div>
                 <label class="small">Общий модуль</label>
@@ -358,7 +429,7 @@
 
             <div style="align-self:end; display:flex; gap:8px;">
                 <button class="btn" type="button" onclick="loadModules(true)">Найти</button>
-                <button class="btn" type="button" onclick="loadMoreModules()">Еще</button>
+                <button class="btn" id="treeLoadMoreBtn" type="button" onclick="loadMoreModules()">Еще</button>
             </div>
         </form>
 

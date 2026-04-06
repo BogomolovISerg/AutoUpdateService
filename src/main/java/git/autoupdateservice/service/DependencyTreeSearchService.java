@@ -4,6 +4,7 @@ import git.autoupdateservice.domain.CommonModuleImpact;
 import git.autoupdateservice.domain.DependencyCallerType;
 import git.autoupdateservice.domain.DependencySnapshot;
 import git.autoupdateservice.domain.DependencySnapshotStatus;
+import git.autoupdateservice.domain.SourceKind;
 import git.autoupdateservice.repo.CommonModuleImpactRepository;
 import git.autoupdateservice.repo.DependencySnapshotRepository;
 import lombok.Builder;
@@ -55,6 +56,8 @@ public class DependencyTreeSearchService {
 
         return rows.stream()
                 .map(r -> ModuleNode.builder()
+                        .sourceKind(parseSourceKind(r.getSourceKind()))
+                        .sourceName(defaultSourceName(parseSourceKind(r.getSourceKind()), r.getSourceName()))
                         .commonModuleName(r.getCommonModuleName())
                         .methodCount(r.getMethodCount())
                         .objectCount(r.getObjectCount())
@@ -63,14 +66,30 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public List<MethodNode> findMethods(String moduleName, DependencyCallerType objectType) {
+    public long countModules(String q, DependencyCallerType objectType) {
         DependencySnapshot snapshot = latestSnapshot().orElse(null);
-        if (snapshot == null || isBlank(moduleName)) {
+        if (snapshot == null) {
+            return 0;
+        }
+
+        return commonModuleImpactRepository.countModuleNodes(
+                snapshot.getId(),
+                normalizeLike(q),
+                objectType == null ? null : objectType.name()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<MethodNode> findMethods(String moduleName, SourceKind sourceKind, String sourceName, DependencyCallerType objectType) {
+        DependencySnapshot snapshot = latestSnapshot().orElse(null);
+        if (snapshot == null || isBlank(moduleName) || sourceKind == null || isBlank(sourceName)) {
             return List.of();
         }
 
         List<CommonModuleImpactRepository.MethodAggRow> rows = commonModuleImpactRepository.findMethodNodes(
                 snapshot.getId(),
+                sourceKind.name(),
+                sourceName.trim(),
                 moduleName,
                 objectType == null ? null : objectType.name()
         );
@@ -85,14 +104,16 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public List<ObjectNode> findObjects(String moduleName, String methodName, DependencyCallerType objectType) {
+    public List<ObjectNode> findObjects(String moduleName, String methodName, SourceKind sourceKind, String sourceName, DependencyCallerType objectType) {
         DependencySnapshot snapshot = latestSnapshot().orElse(null);
-        if (snapshot == null || isBlank(moduleName) || isBlank(methodName)) {
+        if (snapshot == null || isBlank(moduleName) || isBlank(methodName) || sourceKind == null || isBlank(sourceName)) {
             return List.of();
         }
 
         List<CommonModuleImpactRepository.ObjectRow> rows = commonModuleImpactRepository.findObjectNodes(
                 snapshot.getId(),
+                sourceKind.name(),
+                sourceName.trim(),
                 moduleName,
                 methodName,
                 objectType == null ? null : objectType.name()
@@ -161,6 +182,24 @@ public class DependencyTreeSearchService {
         return "%" + q.trim().toLowerCase(Locale.ROOT) + "%";
     }
 
+    private SourceKind parseSourceKind(String value) {
+        if (isBlank(value)) {
+            return SourceKind.BASE;
+        }
+        try {
+            return SourceKind.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return SourceKind.BASE;
+        }
+    }
+
+    private String defaultSourceName(SourceKind sourceKind, String sourceName) {
+        if (!isBlank(sourceName)) {
+            return sourceName.trim();
+        }
+        return sourceKind == SourceKind.EXTENSION ? "Расширение" : "Основная конфигурация";
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
@@ -168,6 +207,8 @@ public class DependencyTreeSearchService {
     @Value
     @Builder
     public static class ModuleNode {
+        SourceKind sourceKind;
+        String sourceName;
         String commonModuleName;
         Integer methodCount;
         Integer objectCount;

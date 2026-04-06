@@ -2,25 +2,25 @@ package git.autoupdateservice.web;
 
 import git.autoupdateservice.domain.CodeSourceRoot;
 import git.autoupdateservice.domain.DependencyCallerType;
-import git.autoupdateservice.domain.DependencyScanLog;
 import git.autoupdateservice.domain.SourceKind;
 import git.autoupdateservice.repo.CodeSourceRootRepository;
 import git.autoupdateservice.service.DependencyGraphStateService;
 import git.autoupdateservice.service.DependencyTreeBuildService;
 import git.autoupdateservice.service.DependencyTreeSearchService;
-import git.autoupdateservice.repo.DependencyScanLogRepository;
 import git.autoupdateservice.service.SettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -34,7 +34,6 @@ public class DependenciesController {
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final CodeSourceRootRepository codeSourceRootRepository;
     private final DependencyGraphStateService dependencyGraphStateService;
-    private final DependencyScanLogRepository dependencyScanLogRepository;
     private final SettingsService settingsService;
 
     private static final DateTimeFormatter TS_FMT =
@@ -68,23 +67,6 @@ public class DependenciesController {
         model.addAttribute("graphStaleSinceFmt",
                 formatTs(graphState == null ? null : graphState.getStaleSince(), zone));
 
-        List<DependencyScanLog> scanLogs = snapshot == null
-                ? List.of()
-                : dependencyScanLogRepository.findTop200BySnapshotOrderByCreatedAtDesc(snapshot);
-
-        Map<String, String> scanLogCreatedAtFmt = new HashMap<>();
-        for (DependencyScanLog r : scanLogs) {
-            if (r.getId() != null && r.getCreatedAt() != null) {
-                scanLogCreatedAtFmt.put(
-                        r.getId().toString(),
-                        r.getCreatedAt().atZoneSameInstant(zone).format(TS_FMT)
-                );
-            }
-        }
-
-        model.addAttribute("scanLogs", scanLogs);
-        model.addAttribute("scanLogCreatedAtFmt", scanLogCreatedAtFmt);
-
         model.addAttribute("snapshotNoteSummary",
                 buildSnapshotNoteSummary(snapshot == null ? null : snapshot.getNotes()));
         model.addAttribute("snapshotNoteRows",
@@ -96,7 +78,8 @@ public class DependenciesController {
         model.addAttribute("objectType", objectType);
         model.addAttribute("objectTypes", DependencyCallerType.values());
         model.addAttribute("baseSource", codeSourceRootRepository.findFirstBySourceKindOrderByUpdatedAtDesc(SourceKind.BASE).orElse(null));
-        model.addAttribute("graphState", dependencyGraphStateService.getState());
+        model.addAttribute("extensionSources", codeSourceRootRepository.findAllBySourceKindAndEnabledIsTrueOrderByPriorityAscSourceNameAsc(SourceKind.EXTENSION));
+        model.addAttribute("graphState", graphState);
         model.addAttribute("dirtyItems", dependencyGraphStateService.latestDirtyItems());
         return "dependencies";
     }
@@ -146,13 +129,24 @@ public class DependenciesController {
         return dependencyTreeSearchService.findModules(q, objectType, limit, offset);
     }
 
+    @GetMapping("/dependencies/tree/modules/count")
+    @ResponseBody
+    public Map<String, Long> treeModuleCount(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) DependencyCallerType objectType
+    ) {
+        return Map.of("total", dependencyTreeSearchService.countModules(q, objectType));
+    }
+
     @GetMapping("/dependencies/tree/methods")
     @ResponseBody
     public List<DependencyTreeSearchService.MethodNode> treeMethods(
             @RequestParam String moduleName,
+            @RequestParam SourceKind sourceKind,
+            @RequestParam String sourceName,
             @RequestParam(required = false) DependencyCallerType objectType
     ) {
-        return dependencyTreeSearchService.findMethods(moduleName, objectType);
+        return dependencyTreeSearchService.findMethods(moduleName, sourceKind, sourceName, objectType);
     }
 
     @GetMapping("/dependencies/tree/objects")
@@ -160,9 +154,11 @@ public class DependenciesController {
     public List<DependencyTreeSearchService.ObjectNode> treeObjects(
             @RequestParam String moduleName,
             @RequestParam String methodName,
+            @RequestParam SourceKind sourceKind,
+            @RequestParam String sourceName,
             @RequestParam(required = false) DependencyCallerType objectType
     ) {
-        return dependencyTreeSearchService.findObjects(moduleName, methodName, objectType);
+        return dependencyTreeSearchService.findObjects(moduleName, methodName, sourceKind, sourceName, objectType);
     }
 
     @lombok.Value
@@ -207,19 +203,24 @@ public class DependenciesController {
         String[] parts = tail.split("\\s*;\\s*");
 
         Pattern p = Pattern.compile(
-                "Пропущен\\s+(общий модуль|объектный модуль):\\s+(.*?)\\s+\\|\\s+rel=(.*?)\\s+\\|\\s+decodedRel=(.*?)\\s+\\|\\s+error=(.*)"
+                "Пропущен\\s+(общий модуль|объектный модуль)(?:\\s+\\[(.*?)] )?:\\s+(.*?)\\s+\\|\\s+rel=(.*?)\\s+\\|\\s+decodedRel=(.*?)\\s+\\|\\s+error=(.*)"
         );
 
         List<SnapshotNoteRow> rows = new ArrayList<>();
         for (String part : parts) {
             Matcher m = p.matcher(part);
             if (m.matches()) {
+                String kind = m.group(1);
+                String sourceName = m.group(2);
+                if (sourceName != null && !sourceName.isBlank()) {
+                    kind = kind + " [" + sourceName + "]";
+                }
                 rows.add(SnapshotNoteRow.builder()
-                        .kind(m.group(1))
-                        .file(m.group(2))
-                        .rel(m.group(3))
-                        .decodedRel(m.group(4))
-                        .error(m.group(5))
+                        .kind(kind)
+                        .file(m.group(3))
+                        .rel(m.group(4))
+                        .decodedRel(m.group(5))
+                        .error(m.group(6))
                         .build());
             } else {
                 rows.add(SnapshotNoteRow.builder()
