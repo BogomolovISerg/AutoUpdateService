@@ -44,7 +44,7 @@ public class DependencyTreeBuildService {
 
     private static final int IMPACT_BATCH_SIZE = 5000;
     private static final int EDGE_BATCH_SIZE = 5000;
-    private static final long MAX_BSL_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
+    private static final long MAX_BSL_FILE_SIZE_BYTES = 12L * 1024L * 1024L;
 
     private final DependencyGraphStateService dependencyGraphStateService;
     private final CodeSourceRootRepository codeSourceRootRepository;
@@ -289,7 +289,7 @@ public class DependencyTreeBuildService {
             edgesSaved += edgeBatch.size();
             edgeBatch.clear();
         }
-
+        graph.buildTreeEntries();
         Map<ObjectRef, List<ObjectFileRef>> objectFilesByOwner = groupObjectFiles(objectFilesByRoot);
         Map<String, Set<String>> exportMembersByModule = graph.exportMembersByModule();
 
@@ -338,31 +338,49 @@ public class DependencyTreeBuildService {
                                 continue;
                             }
 
-                            ImpactKey impactKey = new ImpactKey(
-                                    affected.sourceKind(),
-                                    affected.sourceName(),
-                                    affected.moduleName(),
-                                    affected.impactMemberName(),
-                                    parsed.getObjectType(),
-                                    parsed.getObjectName()
-                            );
-                            if (!objectImpactDedup.add(impactKey)) {
+                            Set<TreeEntry> treeEntries = graph.treeEntriesForNode(nodeKey);
+                            if (treeEntries.isEmpty()) {
                                 continue;
                             }
 
-                            CommonModuleImpact impact = new CommonModuleImpact();
-                            impact.setSnapshot(snapshot);
-                            impact.setSourceKind(affected.sourceKind());
-                            impact.setSourceName(affected.sourceName());
-                            impact.setCommonModuleName(affected.moduleName());
-                            impact.setCommonModuleMemberName(affected.impactMemberName());
-                            impact.setObjectType(parsed.getObjectType());
-                            impact.setObjectName(parsed.getObjectName());
-                            impact.setSourcePath(parsed.getSourcePath());
-                            impact.setViaModule(usage.getExportModule());
-                            impact.setViaMember(usage.getExportMember());
-                            impact.setCreatedAt(processedAt);
-                            impactBatch.add(impact);
+                            for (TreeEntry treeEntry : treeEntries) {
+                                String entryMemberName = treeEntry.memberName();
+                                if (isBlank(entryMemberName)) {
+                                    continue;
+                                }
+
+                                ImpactKey impactKey = new ImpactKey(
+                                        affected.sourceKind(),
+                                        affected.sourceName(),
+                                        affected.moduleName(),
+                                        entryMemberName,
+                                        parsed.getObjectType(),
+                                        parsed.getObjectName()
+                                );
+                                if (!objectImpactDedup.add(impactKey)) {
+                                    continue;
+                                }
+
+                                CommonModuleImpact impact = new CommonModuleImpact();
+                                impact.setSnapshot(snapshot);
+                                impact.setSourceKind(affected.sourceKind());
+                                impact.setSourceName(affected.sourceName());
+                                impact.setCommonModuleName(affected.moduleName());
+                                impact.setCommonModuleMemberName(entryMemberName);
+                                impact.setObjectType(parsed.getObjectType());
+                                impact.setObjectName(parsed.getObjectName());
+                                impact.setSourcePath(parsed.getSourcePath());
+                                impact.setViaModule(usage.getExportModule());
+                                impact.setViaMember(usage.getExportMember());
+                                impact.setCreatedAt(processedAt);
+                                impactBatch.add(impact);
+
+                                if (impactBatch.size() >= IMPACT_BATCH_SIZE) {
+                                    commonModuleImpactRepository.saveAll(impactBatch);
+                                    impactsSaved += impactBatch.size();
+                                    impactBatch.clear();
+                                }
+                            }
 
                             if (impactBatch.size() >= IMPACT_BATCH_SIZE) {
                                 commonModuleImpactRepository.saveAll(impactBatch);
@@ -605,6 +623,13 @@ public class DependencyTreeBuildService {
     ) {
     }
 
+    private record TreeEntry(
+            SourceKind sourceKind,
+            String sourceName,
+            String moduleName,
+            String memberName
+    ) {
+    }
     private record MemberNode(
             String nodeKey,
             SourceKind sourceKind,
@@ -659,6 +684,7 @@ public class DependencyTreeBuildService {
         private final Map<String, Set<String>> exportMembersByModule = new HashMap<>();
         private final Map<String, Set<String>> activeEntryCache = new HashMap<>();
         private final Map<String, Set<String>> reachableCache = new HashMap<>();
+        private final Map<String, Set<TreeEntry>> treeEntriesByNodeKey = new HashMap<>();
 
         void addMember(MemberNode member) {
             membersByNodeKey.put(member.nodeKey(), member);
@@ -770,5 +796,87 @@ public class DependencyTreeBuildService {
                     + "|" + moduleName.toLowerCase(Locale.ROOT)
                     + "|" + actualMemberName.toLowerCase(Locale.ROOT);
         }
+        void buildTreeEntries() {
+            for (MemberNode member : membersByNodeKey.values()) {
+                if (!isTreeEntryCandidate(member)) {
+                    continue;
+                }
+
+                TreeEntry entry = toTreeEntry(member);
+
+                Deque<String> stack = new ArrayDeque<>();
+                Set<String> visited = new HashSet<>();
+                stack.push(member.nodeKey());
+
+                while (!stack.isEmpty()) {
+                    String currentNodeKey = stack.pop();
+                    if (!visited.add(currentNodeKey)) {
+                        continue;
+                    }
+
+                    MemberNode current = membersByNodeKey.get(currentNodeKey);
+                    if (current == null) {
+                        continue;
+                    }
+
+                    if (sameSourceAndModule(current, entry)) {
+                        treeEntriesByNodeKey
+                                .computeIfAbsent(currentNodeKey, k -> new LinkedHashSet<>())
+                                .add(entry);
+                    }
+
+                    for (String next : physicalEdges.getOrDefault(currentNodeKey, Set.of())) {
+                        stack.push(next);
+                    }
+
+                    for (String nextLogical : logicalEdges.getOrDefault(currentNodeKey, Set.of())) {
+                        for (String nextPhysical : resolveActiveEntryMembers(nextLogical)) {
+                            stack.push(nextPhysical);
+                        }
+                    }
+                }
+            }
+        }
+
+        Set<TreeEntry> treeEntriesForNode(String nodeKey) {
+            return treeEntriesByNodeKey.getOrDefault(nodeKey, Set.of());
+        }
+        private boolean isTreeEntryCandidate(MemberNode member) {
+            if (member == null) {
+                return false;
+            }
+            return member.exportedEntry() || member.extensionHook();
+        }
+
+        private TreeEntry toTreeEntry(MemberNode member) {
+            return new TreeEntry(
+                    member.sourceKind(),
+                    member.sourceName(),
+                    member.moduleName(),
+                    member.effectiveMemberName()
+            );
+        }
+
+        private boolean sameSourceAndModule(MemberNode node, TreeEntry entry) {
+            if (node == null || entry == null) {
+                return false;
+            }
+
+            if (node.sourceKind() != entry.sourceKind()) {
+                return false;
+            }
+
+            if (!Objects.equals(
+                    normalizeName(node.sourceName()),
+                    normalizeName(entry.sourceName()))) {
+                return false;
+            }
+
+            return normalizeName(node.moduleName())
+                    .equalsIgnoreCase(normalizeName(entry.moduleName()));
+        }
+    }
+    private String normalizeName(String value) {
+        return value == null ? "" : value.trim();
     }
 }
