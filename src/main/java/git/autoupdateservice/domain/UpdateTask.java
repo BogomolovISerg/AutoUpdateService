@@ -37,6 +37,39 @@ public class UpdateTask {
     @Column(name = "project_path", nullable = false, length = 300)
     private String projectPath;
 
+    @Column(name = "git_project_id")
+    private Long gitProjectId;
+
+    @Column(name = "git_project_name", length = 300)
+    private String gitProjectName;
+
+    @Column(name = "git_ref", length = 300)
+    private String gitRef;
+
+    @Column(name = "git_checkout_sha", length = 80)
+    private String gitCheckoutSha;
+
+    @Column(name = "git_event_name", length = 100)
+    private String gitEventName;
+
+    @Column(name = "git_object_kind", length = 100)
+    private String gitObjectKind;
+
+    @Column(name = "git_user_name", length = 200)
+    private String gitUserName;
+
+    @Column(name = "git_user_username", length = 200)
+    private String gitUserUsername;
+
+    @Column(name = "git_user_email", length = 500)
+    private String gitUserEmail;
+
+    @Column(name = "git_total_commits_count")
+    private Integer gitTotalCommitsCount;
+
+    @Column(name = "git_webhook_received_at")
+    private OffsetDateTime gitWebhookReceivedAt;
+
     @Column(name = "branch", length = 200)
     private String branch;
 

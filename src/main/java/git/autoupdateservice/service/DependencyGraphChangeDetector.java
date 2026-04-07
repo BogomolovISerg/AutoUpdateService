@@ -85,13 +85,17 @@ public class DependencyGraphChangeDetector {
             }
             String decodedPath = oneCNameDecoder.decodePath(path);
             String[] parts = decodedPath.split("/");
-            if (parts.length < 2) {
+            int commonModulesIndex = -1;
+            for (int i = 0; i < parts.length; i++) {
+                if ("commonmodules".equals(parts[i].toLowerCase(Locale.ROOT))) {
+                    commonModulesIndex = i;
+                    break;
+                }
+            }
+            if (commonModulesIndex < 0 || commonModulesIndex + 1 >= parts.length) {
                 continue;
             }
-            if (!"commonmodules".equals(parts[0].toLowerCase(Locale.ROOT))) {
-                continue;
-            }
-            String moduleName = parts[1];
+            String moduleName = parts[commonModulesIndex + 1];
             if (moduleName == null || moduleName.isBlank()) {
                 continue;
             }

@@ -5,6 +5,7 @@ import git.autoupdateservice.domain.LogType;
 import git.autoupdateservice.service.AuditLogService;
 import git.autoupdateservice.service.DependencyGraphChangeDetector;
 import git.autoupdateservice.service.QueueService;
+import git.autoupdateservice.service.TaskChangedFileService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ public class GitlabWebhookController {
     private final QueueService queueService;
     private final AuditLogService auditLogService;
     private final DependencyGraphChangeDetector dependencyGraphChangeDetector;
+    private final TaskChangedFileService taskChangedFileService;
 
     @PostMapping("/webhook")
     public ResponseEntity<?> webhook(
@@ -117,11 +119,24 @@ public class GitlabWebhookController {
 
         String sourceKey = projectPath + ":" + (commitSha == null ? "unknown" : commitSha);
 
+        Long projectId = project != null ? toLong(project.get("id")) : toLong(body.get("project_id"));
+        String projectName = project != null ? asString(project.get("name")) : null;
+
         var enqueued = queueService.enqueueFromWebhook(
                 projectPath,
+                projectId,
+                projectName,
+                ref,
                 branch,
                 beforeSha,
                 commitSha,
+                asString(body.get("checkout_sha")),
+                event,
+                objectKind,
+                pusherName,
+                pusherLogin,
+                asString(body.get("user_email")),
+                toInteger(body.get("total_commits_count")),
                 authorName,
                 authorLogin,
                 comment,
@@ -129,6 +144,7 @@ public class GitlabWebhookController {
                 ip
         );
 
+        enqueued.ifPresent(task -> taskChangedFileService.fetchAndStoreFullChanges(task, ip));
         dependencyGraphChangeDetector.analyzePushAndMarkStale(projectPath, beforeSha, commitSha, ip);
 
         return ResponseEntity.ok(Map.of(
@@ -265,6 +281,26 @@ public class GitlabWebhookController {
         return (o instanceof Map<?, ?> m) ? (Map<String, Object>) m : null;
     }
 
+
+    private static Integer toInteger(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(String.valueOf(o).trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Long toLong(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.longValue();
+        try {
+            return Long.parseLong(String.valueOf(o).trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
     private static String parseBranch(String ref) {
         if (ref == null) return null;
         String p = "refs/heads/";

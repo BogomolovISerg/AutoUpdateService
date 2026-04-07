@@ -10,4 +10,5 @@ import java.util.UUID;
 public interface DependencySnapshotRepository extends JpaRepository<DependencySnapshot, UUID> {
 
     Optional<DependencySnapshot> findTopByStatusOrderByFinishedAtDesc(DependencySnapshotStatus status);
+    boolean existsByStatus(DependencySnapshotStatus status);
 }

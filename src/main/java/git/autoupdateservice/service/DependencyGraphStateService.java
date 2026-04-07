@@ -39,6 +39,16 @@ public class DependencyGraphStateService {
         return Optional.ofNullable(getState().getActiveSnapshot());
     }
 
+
+    @Transactional
+    public void markGitWebhookReceived(OffsetDateTime changeAt) {
+        DependencyGraphState state = getState();
+        OffsetDateTime now = changeAt != null ? changeAt : OffsetDateTime.now();
+        state.setLastGitChangeAt(now);
+        state.setUpdatedAt(OffsetDateTime.now());
+        dependencyGraphStateRepository.save(state);
+    }
+
     @Transactional
     public void markGraphStale(SourceKind sourceKind, String sourceName, Collection<DirtyModuleHit> hits, OffsetDateTime changeAt, String reason) {
         if (hits == null || hits.isEmpty()) {

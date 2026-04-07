@@ -28,9 +28,19 @@ public class QueueService {
     @Transactional
     public Optional<UpdateTask> enqueueFromWebhook(
             String projectPath,
+            Long gitProjectId,
+            String gitProjectName,
+            String ref,
             String branch,
             String beforeSha,
             String commitSha,
+            String checkoutSha,
+            String eventName,
+            String objectKind,
+            String userName,
+            String userUsername,
+            String userEmail,
+            Integer totalCommitsCount,
             String authorName,
             String authorLogin,
             String comment,
@@ -58,6 +68,17 @@ public class QueueService {
         t.setExtensionName(binding.getExtensionName());
         t.setRepoPath(binding.getRepoPath());
         t.setProjectPath(projectPath);
+        t.setGitProjectId(gitProjectId);
+        t.setGitProjectName(gitProjectName);
+        t.setGitRef(ref);
+        t.setGitCheckoutSha(checkoutSha);
+        t.setGitEventName(eventName);
+        t.setGitObjectKind(objectKind);
+        t.setGitUserName(userName);
+        t.setGitUserUsername(userUsername);
+        t.setGitUserEmail(userEmail);
+        t.setGitTotalCommitsCount(totalCommitsCount);
+        t.setGitWebhookReceivedAt(OffsetDateTime.now());
         t.setBranch(branch);
         t.setBeforeSha(beforeSha);
         t.setCommitSha(commitSha);

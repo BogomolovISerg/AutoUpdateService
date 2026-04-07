@@ -375,7 +375,7 @@
         <div class="card" th:if="${graphState != null}" style="margin-top:12px;">
             <p>Статус графа: <b th:text="${graphState.graphIsStale} ? 'Устарел' : 'Актуален'">Актуален</b></p>
             <p>Активный snapshot: <b th:text="${graphState.activeSnapshot != null ? graphState.activeSnapshot.id : '—'}">—</b></p>
-            <p>Последнее изменение от Git: <b th:text="${graphLastGitChangeAtFmt} ?: '—'">—</b></p>
+            <p>Последнее изменение от Git: <b th:text="${graphLastGitChangeAtFmt} ?: ''">—</b></p>
             <p>Последний rebuild: <b th:text="${graphLastRebuildAtFmt} ?: '—'">—</b></p>
             <p th:if="${graphState.staleSince != null}">Устарел с: <b th:text="${graphStaleSinceFmt} ?: '—'">—</b></p>
             <p th:if="${graphState.staleReason != null and !#strings.isEmpty(graphState.staleReason)}">
