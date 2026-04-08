@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +29,14 @@ public class DependencyTreeSearchService {
 
     private final DependencySnapshotRepository dependencySnapshotRepository;
     private final CommonModuleImpactRepository commonModuleImpactRepository;
+
+    @Transactional(readOnly = true)
+    public DependencySnapshot findSnapshotOrNull(UUID snapshotId) {
+        if (snapshotId == null) {
+            return null;
+        }
+        return dependencySnapshotRepository.findById(snapshotId).orElse(null);
+    }
 
     @Transactional(readOnly = true)
     public Optional<DependencySnapshot> latestSnapshot() {
@@ -40,8 +49,8 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public List<ModuleNode> findModules(String q, DependencyCallerType objectType, int limit, int offset) {
-        DependencySnapshot snapshot = latestSnapshot().orElse(null);
+    public List<ModuleNode> findModules(UUID snapshotId, String q, DependencyCallerType objectType, int limit, int offset) {
+                DependencySnapshot snapshot = findSnapshotOrNull(snapshotId);
         if (snapshot == null) {
             return List.of();
         }
@@ -66,8 +75,8 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public long countModules(String q, DependencyCallerType objectType) {
-        DependencySnapshot snapshot = latestSnapshot().orElse(null);
+    public long countModules(UUID snapshotId, String q, DependencyCallerType objectType) {
+                DependencySnapshot snapshot = findSnapshotOrNull(snapshotId);
         if (snapshot == null) {
             return 0;
         }
@@ -80,8 +89,8 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public List<MethodNode> findMethods(String moduleName, SourceKind sourceKind, String sourceName, DependencyCallerType objectType) {
-        DependencySnapshot snapshot = latestSnapshot().orElse(null);
+    public List<MethodNode> findMethods(UUID snapshotId, String moduleName, SourceKind sourceKind, String sourceName, DependencyCallerType objectType) {
+                DependencySnapshot snapshot = findSnapshotOrNull(snapshotId);
         if (snapshot == null || isBlank(moduleName) || sourceKind == null || isBlank(sourceName)) {
             return List.of();
         }
@@ -90,7 +99,7 @@ public class DependencyTreeSearchService {
                 snapshot.getId(),
                 sourceKind.name(),
                 sourceName.trim(),
-                moduleName,
+                moduleName.trim(),
                 objectType == null ? null : objectType.name()
         );
 
@@ -104,9 +113,20 @@ public class DependencyTreeSearchService {
     }
 
     @Transactional(readOnly = true)
-    public List<ObjectNode> findObjects(String moduleName, String methodName, SourceKind sourceKind, String sourceName, DependencyCallerType objectType) {
-        DependencySnapshot snapshot = latestSnapshot().orElse(null);
-        if (snapshot == null || isBlank(moduleName) || isBlank(methodName) || sourceKind == null || isBlank(sourceName)) {
+    public List<ObjectNode> findObjects(
+            UUID snapshotId,
+            String moduleName,
+            String methodName,
+            SourceKind sourceKind,
+            String sourceName,
+            DependencyCallerType objectType
+    ) {
+        DependencySnapshot snapshot = findSnapshotOrNull(snapshotId);
+        if (snapshot == null
+                || isBlank(moduleName)
+                || isBlank(methodName)
+                || sourceKind == null
+                || isBlank(sourceName)) {
             return List.of();
         }
 
@@ -114,8 +134,8 @@ public class DependencyTreeSearchService {
                 snapshot.getId(),
                 sourceKind.name(),
                 sourceName.trim(),
-                moduleName,
-                methodName,
+                moduleName.trim(),
+                methodName.trim(),
                 objectType == null ? null : objectType.name()
         );
 
@@ -123,7 +143,7 @@ public class DependencyTreeSearchService {
                 .filter(r -> !isBlank(r.getObjectType()))
                 .filter(r -> !isBlank(r.getObjectName()))
                 .map(r -> ObjectNode.builder()
-                        .objectType(DependencyCallerType.valueOf(r.getObjectType()))
+                        .objectType(parseObjectType(r.getObjectType()))
                         .objectName(r.getObjectName())
                         .build())
                 .sorted(Comparator
@@ -140,6 +160,16 @@ public class DependencyTreeSearchService {
         return findAffectedObjectsByCommonModules(Set.of(commonModuleName));
     }
 
+    private DependencyCallerType parseObjectType(String value) {
+        if (isBlank(value)) {
+            return null;
+        }
+        try {
+            return DependencyCallerType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
     @Transactional(readOnly = true)
     public List<AffectedObject> findAffectedObjectsByCommonModules(Collection<String> commonModuleNames) {
         if (commonModuleNames == null || commonModuleNames.isEmpty()) {

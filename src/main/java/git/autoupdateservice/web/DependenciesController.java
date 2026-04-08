@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.UUID;
 
 @Controller
 @RequiredArgsConstructor
@@ -73,6 +74,7 @@ public class DependenciesController {
                 parseSnapshotNotes(snapshot == null ? null : snapshot.getNotes()));
 
         model.addAttribute("snapshot", snapshot);
+        model.addAttribute("treeSnapshotId", snapshot == null ? null : snapshot.getId());
         model.addAttribute("mode", mode);
         model.addAttribute("q", q);
         model.addAttribute("objectType", objectType);
@@ -121,44 +123,48 @@ public class DependenciesController {
     @GetMapping("/dependencies/tree/modules")
     @ResponseBody
     public List<DependencyTreeSearchService.ModuleNode> treeModules(
+            @RequestParam UUID snapshotId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) DependencyCallerType objectType,
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset
     ) {
-        return dependencyTreeSearchService.findModules(q, objectType, limit, offset);
+        return dependencyTreeSearchService.findModules(snapshotId, q, objectType, limit, offset);
     }
 
     @GetMapping("/dependencies/tree/modules/count")
     @ResponseBody
     public Map<String, Long> treeModuleCount(
+            @RequestParam UUID snapshotId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) DependencyCallerType objectType
     ) {
-        return Map.of("total", dependencyTreeSearchService.countModules(q, objectType));
+        return Map.of("total", dependencyTreeSearchService.countModules(snapshotId, q, objectType));
     }
 
     @GetMapping("/dependencies/tree/methods")
     @ResponseBody
     public List<DependencyTreeSearchService.MethodNode> treeMethods(
+            @RequestParam UUID snapshotId,
             @RequestParam String moduleName,
             @RequestParam SourceKind sourceKind,
             @RequestParam String sourceName,
             @RequestParam(required = false) DependencyCallerType objectType
     ) {
-        return dependencyTreeSearchService.findMethods(moduleName, sourceKind, sourceName, objectType);
+        return dependencyTreeSearchService.findMethods(snapshotId, moduleName, sourceKind, sourceName, objectType);
     }
 
     @GetMapping("/dependencies/tree/objects")
     @ResponseBody
     public List<DependencyTreeSearchService.ObjectNode> treeObjects(
+            @RequestParam UUID snapshotId,
             @RequestParam String moduleName,
             @RequestParam String methodName,
             @RequestParam SourceKind sourceKind,
             @RequestParam String sourceName,
             @RequestParam(required = false) DependencyCallerType objectType
     ) {
-        return dependencyTreeSearchService.findObjects(moduleName, methodName, sourceKind, sourceName, objectType);
+        return dependencyTreeSearchService.findObjects(snapshotId, moduleName, methodName, sourceKind, sourceName, objectType);
     }
 
     @lombok.Value

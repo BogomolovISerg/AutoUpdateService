@@ -5,264 +5,6 @@
     <title>Зависимости</title>
     <link rel="stylesheet" href="/app.css"/>
 </head>
-<script>
-    let treeOffset = 0;
-    let treeLimit = 100;
-    let treeTotal = null;
-
-    function esc(s) {
-        return (s ?? '')
-            .replaceAll('&', '&amp;')
-            .replaceAll('<', '&lt;')
-            .replaceAll('>', '&gt;')
-            .replaceAll('"', '&quot;');
-    }
-
-    function currentFilters() {
-        return {
-            q: document.getElementById('q')?.value ?? '',
-            objectType: document.getElementById('objectType')?.value ?? ''
-        };
-    }
-
-    function updateMoreButton() {
-        const btn = document.getElementById('treeLoadMoreBtn');
-        if (!btn) return;
-
-        const allLoaded = treeTotal !== null && treeOffset >= treeTotal;
-        btn.disabled = allLoaded;
-        btn.textContent = allLoaded ? 'Все загружено' : 'Еще';
-    }
-
-    function updateTreeStatus() {
-        const status = document.getElementById('treeStatus');
-        if (!status) return;
-
-        if (treeTotal === null) {
-            status.textContent = 'Загрузка модулей...';
-            return;
-        }
-
-        if (treeTotal === 0) {
-            status.textContent = 'Данных нет';
-            return;
-        }
-
-        let text = 'Показано модулей: ' + treeOffset + ' из ' + treeTotal;
-        if (treeOffset < treeTotal) {
-            text += '. Нажмите "Еще" для следующей порции.';
-        } else {
-            text += '. Загружен весь список.';
-        }
-        status.textContent = text;
-    }
-
-    async function loadModuleCount() {
-        const f = currentFilters();
-        const params = new URLSearchParams();
-        if (f.q) params.set('q', f.q);
-        if (f.objectType) params.set('objectType', f.objectType);
-
-        const resp = await fetch('/dependencies/tree/modules/count?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        if (!resp.ok) {
-            treeTotal = null;
-            updateTreeStatus();
-            return;
-        }
-
-        const data = await resp.json();
-        treeTotal = Number(data.total ?? 0);
-        updateTreeStatus();
-        updateMoreButton();
-    }
-
-    async function loadModules(reset) {
-        const root = document.getElementById('treeRoot');
-        const status = document.getElementById('treeStatus');
-        const f = currentFilters();
-
-        if (reset) {
-            treeOffset = 0;
-            treeTotal = null;
-            root.innerHTML = '';
-            updateMoreButton();
-            await loadModuleCount();
-            if (treeTotal === 0) {
-                return;
-            }
-        }
-
-        status.textContent = 'Загрузка модулей...';
-
-        const params = new URLSearchParams();
-        if (f.q) params.set('q', f.q);
-        if (f.objectType) params.set('objectType', f.objectType);
-        params.set('limit', treeLimit);
-        params.set('offset', treeOffset);
-
-        const resp = await fetch('/dependencies/tree/modules?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        if (!resp.ok) {
-            status.textContent = 'Ошибка загрузки модулей';
-            return;
-        }
-
-        const data = await resp.json();
-
-        if (reset && data.length === 0) {
-            treeTotal = 0;
-            updateTreeStatus();
-            updateMoreButton();
-            return;
-        }
-
-        if (data.length === 0) {
-            updateTreeStatus();
-            updateMoreButton();
-            return;
-        }
-
-        for (const item of data) {
-            const moduleId = 'module_' + btoa(unescape(encodeURIComponent(item.commonModuleName))).replaceAll('=', '');
-            const html = `
-                <details class="tree-module" style="margin-bottom:8px; border:1px solid #ddd; border-radius:8px; padding:8px;"
-                         data-module-name="${esc(item.commonModuleName)}"
-                         data-source-kind="${esc(item.sourceKind)}"
-                         data-source-name="${esc(item.sourceName)}"
-                         ontoggle="onModuleToggle(this)">
-                    <summary style="cursor:pointer;">
-                        <b>${esc(item.commonModuleName)}</b>
-                        ${item.sourceKind === 'EXTENSION' ? `<span class="small">[${esc(item.sourceName)}]</span>` : ''}
-                        <span class="small">(${item.methodCount ?? 0} методов, ${item.objectCount ?? 0} объектов)</span>
-                    </summary>
-                    <div id="${moduleId}" class="module-children" style="padding-left:16px; margin-top:8px;"></div>
-                </details>
-            `;
-            root.insertAdjacentHTML('beforeend', html);
-        }
-
-        treeOffset += data.length;
-        updateTreeStatus();
-        updateMoreButton();
-    }
-
-    async function onModuleToggle(detailsEl) {
-        if (!detailsEl.open) return;
-
-        const container = detailsEl.querySelector('.module-children');
-        if (container.dataset.loaded === '1') return;
-
-        const moduleName = detailsEl.dataset.moduleName;
-        const sourceKind = detailsEl.dataset.sourceKind;
-        const sourceName = detailsEl.dataset.sourceName;
-        const f = currentFilters();
-
-        container.innerHTML = '<div class="small">Загрузка методов...</div>';
-
-        const params = new URLSearchParams();
-        params.set('moduleName', moduleName);
-        params.set('sourceKind', sourceKind);
-        params.set('sourceName', sourceName);
-        if (f.objectType) params.set('objectType', f.objectType);
-
-        const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        if (!resp.ok) {
-            container.innerHTML = '<div class="small">Ошибка загрузки методов</div>';
-            return;
-        }
-
-        const data = await resp.json();
-
-        if (data.length === 0) {
-            container.innerHTML = '<div class="small">Методов нет</div>';
-            container.dataset.loaded = '1';
-            return;
-        }
-
-        container.innerHTML = '';
-
-        for (const item of data) {
-            const methodKey = moduleName + '||' + item.methodName;
-            const methodId = 'method_' + btoa(unescape(encodeURIComponent(methodKey))).replaceAll('=', '');
-            const html = `
-                <details class="tree-method" style="margin-bottom:6px;"
-                         data-module-name="${esc(moduleName)}"
-                         data-source-kind="${esc(sourceKind)}"
-                         data-source-name="${esc(sourceName)}"
-                         data-method-name="${esc(item.methodName)}"
-                         ontoggle="onMethodToggle(this)">
-                    <summary style="cursor:pointer;">
-                        ${esc(item.methodName)}
-                        <span class="small">(${item.objectCount ?? 0} объектов)</span>
-                    </summary>
-                    <div id="${methodId}" class="method-children" style="padding-left:18px; margin-top:6px;"></div>
-                </details>
-            `;
-            container.insertAdjacentHTML('beforeend', html);
-        }
-
-        container.dataset.loaded = '1';
-    }
-
-    async function onMethodToggle(detailsEl) {
-        if (!detailsEl.open) return;
-
-        const container = detailsEl.querySelector('.method-children');
-        if (container.dataset.loaded === '1') return;
-
-        const moduleName = detailsEl.dataset.moduleName;
-        const sourceKind = detailsEl.dataset.sourceKind;
-        const sourceName = detailsEl.dataset.sourceName;
-        const methodName = detailsEl.dataset.methodName;
-        const f = currentFilters();
-
-        container.innerHTML = '<div class="small">Загрузка объектов...</div>';
-
-        const params = new URLSearchParams();
-        params.set('moduleName', moduleName);
-        params.set('sourceKind', sourceKind);
-        params.set('sourceName', sourceName);
-        params.set('methodName', methodName);
-        if (f.objectType) params.set('objectType', f.objectType);
-
-        const resp = await fetch('/dependencies/tree/objects?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        if (!resp.ok) {
-            container.innerHTML = '<div class="small">Ошибка загрузки объектов</div>';
-            return;
-        }
-
-        const data = await resp.json();
-
-        if (data.length === 0) {
-            container.innerHTML = '<div class="small">Объектов нет</div>';
-            container.dataset.loaded = '1';
-            return;
-        }
-
-        const items = data.map(x => `<li>${esc(x.objectType)}.${esc(x.objectName)}</li>`).join('');
-        container.innerHTML = `<ul style="margin:0; padding-left:18px;">${items}</ul>`;
-        container.dataset.loaded = '1';
-    }
-
-    function loadMoreModules() {
-        loadModules(false);
-    }
-
-    document.addEventListener('DOMContentLoaded', function () {
-        loadModules(true);
-    });
-</script>
 <body>
 <div class="nav">
     <a href="/">Dashboard</a>
@@ -440,5 +182,277 @@
         </div>
     </div>
 </div>
+<script th:inline="javascript">
+    const treeSnapshotId = /*[[${treeSnapshotId}]]*/ null;
+    let treeOffset = 0;
+    let treeLimit = 100;
+    let treeTotal = null;
+
+    function esc(s) {
+        return (s ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;');
+    }
+
+    function currentFilters() {
+        return {
+            q: document.getElementById('q')?.value ?? '',
+            objectType: document.getElementById('objectType')?.value ?? ''
+        };
+    }
+
+    function updateMoreButton() {
+        const btn = document.getElementById('treeLoadMoreBtn');
+        if (!btn) return;
+
+        const allLoaded = treeTotal !== null && treeOffset >= treeTotal;
+        btn.disabled = allLoaded;
+        btn.textContent = allLoaded ? 'Все загружено' : 'Еще';
+    }
+
+    function updateTreeStatus() {
+        const status = document.getElementById('treeStatus');
+        if (!status) return;
+
+        if (treeTotal === null) {
+            status.textContent = 'Загрузка модулей...';
+            return;
+        }
+
+        if (treeTotal === 0) {
+            status.textContent = 'Данных нет';
+            return;
+        }
+
+        let text = 'Показано модулей: ' + treeOffset + ' из ' + treeTotal;
+        if (treeOffset < treeTotal) {
+            text += '. Нажмите "Еще" для следующей порции.';
+        } else {
+            text += '. Загружен весь список.';
+        }
+        status.textContent = text;
+    }
+
+    async function loadModuleCount() {
+        if (!treeSnapshotId) {
+            treeTotal = 0;
+            updateTreeStatus();
+            return;
+        }
+        const f = currentFilters();
+        const params = new URLSearchParams();
+        params.set('snapshotId', treeSnapshotId);
+        if (f.q) params.set('q', f.q);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/modules/count?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            treeTotal = null;
+            updateTreeStatus();
+            return;
+        }
+
+        const data = await resp.json();
+        treeTotal = Number(data.total ?? 0);
+        updateTreeStatus();
+        updateMoreButton();
+    }
+
+    async function loadModules(reset) {
+        const root = document.getElementById('treeRoot');
+        const status = document.getElementById('treeStatus');
+        const f = currentFilters();
+        if (!treeSnapshotId) {
+            root.innerHTML = '<div class="small">Нет готового снимка зависимостей</div>';
+            status.textContent = 'Нет готового снимка зависимостей';
+            return;
+        }
+        if (reset) {
+            treeOffset = 0;
+            treeTotal = null;
+            root.innerHTML = '';
+            updateMoreButton();
+            await loadModuleCount();
+            if (treeTotal === 0) {
+                return;
+            }
+        }
+
+        status.textContent = 'Загрузка модулей...';
+
+        const params = new URLSearchParams();
+        params.set('snapshotId', treeSnapshotId);
+        if (f.q) params.set('q', f.q);
+        if (f.objectType) params.set('objectType', f.objectType);
+        params.set('limit', treeLimit);
+        params.set('offset', treeOffset);
+
+        const resp = await fetch('/dependencies/tree/modules?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            status.textContent = 'Ошибка загрузки модулей';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (reset && data.length === 0) {
+            treeTotal = 0;
+            updateTreeStatus();
+            updateMoreButton();
+            return;
+        }
+
+        if (data.length === 0) {
+            updateTreeStatus();
+            updateMoreButton();
+            return;
+        }
+
+        for (const item of data) {
+            const moduleId = 'module_' + btoa(unescape(encodeURIComponent(item.commonModuleName))).replaceAll('=', '');
+            const html = `
+                <details class="tree-module" style="margin-bottom:8px; border:1px solid #ddd; border-radius:8px; padding:8px;"
+                         data-module-name="${esc(item.commonModuleName)}"
+                         data-source-kind="${esc(item.sourceKind)}"
+                         data-source-name="${esc(item.sourceName)}"
+                         ontoggle="onModuleToggle(this)">
+                    <summary style="cursor:pointer;">
+                        <b>${esc(item.commonModuleName)}</b>
+                        ${item.sourceKind === 'EXTENSION' ? `<span class="small">[${esc(item.sourceName)}]</span>` : ''}
+                        <span class="small">(${item.methodCount ?? 0} методов, ${item.objectCount ?? 0} объектов)</span>
+                    </summary>
+                    <div id="${moduleId}" class="module-children" style="padding-left:16px; margin-top:8px;"></div>
+                </details>
+            `;
+            root.insertAdjacentHTML('beforeend', html);
+        }
+
+        treeOffset += data.length;
+        updateTreeStatus();
+        updateMoreButton();
+    }
+
+    async function onModuleToggle(detailsEl) {
+        if (!detailsEl.open) return;
+
+        const container = detailsEl.querySelector('.module-children');
+        if (container.dataset.loaded === '1') return;
+
+        const moduleName = detailsEl.dataset.moduleName;
+        const sourceKind = detailsEl.dataset.sourceKind;
+        const sourceName = detailsEl.dataset.sourceName;
+        const f = currentFilters();
+
+        container.innerHTML = '<div class="small">Загрузка методов...</div>';
+
+        const params = new URLSearchParams();
+        params.set('snapshotId', treeSnapshotId);
+        params.set('moduleName', moduleName);
+        params.set('sourceKind', sourceKind);
+        params.set('sourceName', sourceName);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            container.innerHTML = '<div class="small">Ошибка загрузки методов</div>';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (data.length === 0) {
+            container.innerHTML = '<div class="small">Методов нет</div>';
+            container.dataset.loaded = '1';
+            return;
+        }
+
+        container.innerHTML = '';
+
+        for (const item of data) {
+            const methodKey = moduleName + '||' + item.methodName;
+            const methodId = 'method_' + btoa(unescape(encodeURIComponent(methodKey))).replaceAll('=', '');
+            const html = `
+                <details class="tree-method" style="margin-bottom:6px;"
+                         data-module-name="${esc(moduleName)}"
+                         data-source-kind="${esc(sourceKind)}"
+                         data-source-name="${esc(sourceName)}"
+                         data-method-name="${esc(item.methodName)}"
+                         ontoggle="onMethodToggle(this)">
+                    <summary style="cursor:pointer;">
+                        ${esc(item.methodName)}
+                        <span class="small">(${item.objectCount ?? 0} объектов)</span>
+                    </summary>
+                    <div id="${methodId}" class="method-children" style="padding-left:18px; margin-top:6px;"></div>
+                </details>
+            `;
+            container.insertAdjacentHTML('beforeend', html);
+        }
+
+        container.dataset.loaded = '1';
+    }
+
+    async function onMethodToggle(detailsEl) {
+        if (!detailsEl.open) return;
+
+        const container = detailsEl.querySelector('.method-children');
+        if (container.dataset.loaded === '1') return;
+
+        const moduleName = detailsEl.dataset.moduleName;
+        const sourceKind = detailsEl.dataset.sourceKind;
+        const sourceName = detailsEl.dataset.sourceName;
+        const methodName = detailsEl.dataset.methodName;
+        const f = currentFilters();
+
+        container.innerHTML = '<div class="small">Загрузка объектов...</div>';
+
+        const params = new URLSearchParams();
+        params.set('snapshotId', treeSnapshotId);
+        params.set('moduleName', moduleName);
+        params.set('sourceKind', sourceKind);
+        params.set('sourceName', sourceName);
+        params.set('methodName', methodName);
+        if (f.objectType) params.set('objectType', f.objectType);
+
+        const resp = await fetch('/dependencies/tree/objects?' + params.toString(), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (!resp.ok) {
+            container.innerHTML = '<div class="small">Ошибка загрузки объектов</div>';
+            return;
+        }
+
+        const data = await resp.json();
+
+        if (data.length === 0) {
+            container.innerHTML = '<div class="small">Объектов нет</div>';
+            container.dataset.loaded = '1';
+            return;
+        }
+
+        const items = data.map(x => `<li>${esc(x.objectType)}.${esc(x.objectName)}</li>`).join('');
+        container.innerHTML = `<ul style="margin:0; padding-left:18px;">${items}</ul>`;
+        container.dataset.loaded = '1';
+    }
+
+    function loadMoreModules() {
+        loadModules(false);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadModules(true);
+    });
+</script>
 </body>
 </html>
