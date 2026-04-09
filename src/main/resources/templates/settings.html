@@ -38,8 +38,8 @@
                 </div>
 
                 <div class="col-6">
-                    <label>Дата ближайшего запуска (ночь)</label>
-                    <input class="input" type="date" th:field="*{nextRunDate}"/>
+                    <label>Дата ближайшего запуска тестовой базы</label>
+                    <input class="input" type="date" th:field="*{nextTestRunDate}"/>
                 </div>
                 <div class="col-6">
                     <label>Код блокировки</label>
@@ -47,12 +47,21 @@
                 </div>
 
                 <div class="col-6">
-                    <label>Время запуска</label>
-                    <input class="input" type="time" th:field="*{runTime}"/>
+                    <label>Время запуска тестовой базы</label>
+                    <input class="input" type="time" th:field="*{testRunTime}"/>
                 </div>
                 <div class="col-6">
                     <label>Количество попыток</label>
                     <input class="input" type="number" min="1" th:field="*{closedMaxAttempts}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Дата ближайшего запуска рабочей базы</label>
+                    <input class="input" type="date" th:field="*{nextProductionRunDate}"/>
+                </div>
+                <div class="col-6">
+                    <label>Время запуска рабочей базы</label>
+                    <input class="input" type="time" th:field="*{productionRunTime}"/>
                 </div>
 
                 <div class="col-6">

@@ -25,8 +25,8 @@
         <div class="card dashboard-summary-card" id="dashboard-summary-card">
             <h3>Автообновление</h3>
             <p>Статус: <b th:text="${settings.autoUpdateEnabled} ? 'Включено' : 'Выключено'">Включено</b></p>
-            <p>Следующая дата: <b th:text="${settings.nextRunDate} ?: '-'">-</b></p>
-            <p>Время: <b th:text="${settings.runTime}">02:00</b></p>
+            <p>Тестовая база: <b th:text="${settings.nextTestRunDate} ?: '-'">-</b> <b th:text="${settings.testRunTime}">02:00</b></p>
+            <p>Рабочая база: <b th:text="${settings.nextProductionRunDate} ?: '-'">-</b> <b th:text="${settings.productionRunTime}">04:00</b></p>
             <p>Новые задачи в очереди: <b th:text="${pendingNewCount}">0</b></p>
             <a class="btn" href="/settings">Открыть настройки</a>
         </div>
@@ -39,6 +39,7 @@
                     <thead>
                     <tr>
                         <th>запланировано</th>
+                        <th>stage</th>
                         <th>статус</th>
                         <th>snapshot графа</th>
                         <th>ошибка</th>
@@ -47,6 +48,7 @@
                     <tbody>
                     <tr th:each="r : ${recentRuns}">
                         <td th:text="${plannedForFmt[r.id]} ?: '—'">—</td>
+                        <td th:text="${r.stage}">—</td>
                         <td th:text="${r.status}">—</td>
                         <td class="wrap" th:text="${dependencySnapshotFmt[r.id]} ?: '—'">—</td>
                         <td class="wrap" th:text="${r.errorSummary}">—</td>

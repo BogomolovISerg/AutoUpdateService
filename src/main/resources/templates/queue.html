@@ -36,6 +36,8 @@
                 <select class="input" name="status">
                     <option th:selected="${status == null}" value="">(any)</option>
                     <option th:selected="${status?.name() == 'NEW'}" value="NEW">NEW</option>
+                    <option th:selected="${status?.name() == 'TEST_FAILED'}" value="TEST_FAILED">TEST_FAILED</option>
+                    <option th:selected="${status?.name() == 'TEST_OK'}" value="TEST_OK">TEST_OK</option>
                     <option th:selected="${status?.name() == 'CANCELED'}" value="CANCELED">CANCELED</option>
                     <option th:selected="${status?.name() == 'UPDATED'}" value="UPDATED">UPDATED</option>
                 </select>
@@ -96,13 +98,17 @@
                     </td>
                     <td>
                         <div class="queue-action">
-                            <form th:if="${t.status.name() == 'NEW' or t.status.name() == 'CANCELED'}"
+                            <form th:if="${t.status.name() == 'NEW' or t.status.name() == 'TEST_FAILED' or t.status.name() == 'CANCELED'}"
                                   method="post"
                                   th:action="@{/queue/{id}/toggle(id=${t.id})}">
                                 <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                                 <button class="btn secondary" type="submit"
-                                        th:text="${t.status.name() == 'NEW'} ? 'Отменить' : 'Вернуть'">Отменить</button>
+                                        th:text="${t.status.name() == 'CANCELED'} ? 'Вернуть' : 'Отменить'">Отменить</button>
                             </form>
+                            <button th:if="${t.status.name() == 'TEST_OK'}"
+                                    class="btn secondary"
+                                    type="button"
+                                    disabled>Ждёт prod</button>
                             <button th:if="${t.status.name() == 'UPDATED'}"
                                     class="btn secondary"
                                     type="button"

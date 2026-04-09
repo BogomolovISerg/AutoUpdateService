@@ -28,8 +28,10 @@
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
 
             <input type="hidden" th:field="*{autoUpdateEnabled}"/>
-            <input type="hidden" th:field="*{runTime}"/>
-            <input type="hidden" th:field="*{nextRunDate}"/>
+            <input type="hidden" th:field="*{testRunTime}"/>
+            <input type="hidden" th:field="*{nextTestRunDate}"/>
+            <input type="hidden" th:field="*{productionRunTime}"/>
+            <input type="hidden" th:field="*{nextProductionRunDate}"/>
             <input type="hidden" th:field="*{timezone}"/>
             <input type="hidden" th:field="*{lockMessage}"/>
             <input type="hidden" th:field="*{uccode}"/>
