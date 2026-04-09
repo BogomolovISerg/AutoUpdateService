@@ -33,15 +33,6 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class DependencyTreeBuildService {
 
-    private static final Set<String> ALLOWED_ROOTS = Set.of(
-            "CommonModules",
-            "Catalogs",
-            "Documents",
-            "Reports",
-            "CommonForms",
-            "DataProcessors"
-    );
-
     private static final int IMPACT_BATCH_SIZE = 5000;
     private static final int EDGE_BATCH_SIZE = 5000;
     private static final long MAX_BSL_FILE_SIZE_BYTES = 12L * 1024L * 1024L;
@@ -53,6 +44,7 @@ public class DependencyTreeBuildService {
     private final CommonModuleImpactRepository commonModuleImpactRepository;
     private final DependencyCallExclusionRepository dependencyCallExclusionRepository;
     private final BslDependencyParser bslDependencyParser;
+    private final DependencySourceRootService dependencySourceRootService;
     private final OneCNameDecoder oneCNameDecoder;
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final DependencyScanLogRepository dependencyScanLogRepository;
@@ -78,7 +70,7 @@ public class DependencyTreeBuildService {
         snapshot = dependencySnapshotRepository.save(snapshot);
 
         try {
-            List<SourceRootCtx> scanRoots = collectScanRoots(baseSourceRoot);
+            List<DependencySourceRootService.ScanRoot> scanRoots = dependencySourceRootService.collectScanRoots(baseSourceRoot);
             saveScanLog(snapshot, "INFO", "START", baseSourceRoot.getRootPath(),
                     "Запущено полное сканирование. Источников=" + scanRoots.size(), null);
 
@@ -112,79 +104,22 @@ public class DependencyTreeBuildService {
         }
     }
 
-    private List<SourceRootCtx> collectScanRoots(CodeSourceRoot baseSourceRoot) {
-        List<SourceRootCtx> result = new ArrayList<>();
-        result.add(toCtx(baseSourceRoot));
-
-        List<CodeSourceRoot> extensionRoots = codeSourceRootRepository
-                .findAllBySourceKindAndEnabledIsTrueOrderByPriorityAscSourceNameAsc(SourceKind.EXTENSION);
-
-        for (CodeSourceRoot extensionRoot : extensionRoots) {
-            if (extensionRoot.getId() != null && extensionRoot.getId().equals(baseSourceRoot.getId())) {
-                continue;
-            }
-            result.add(toCtx(extensionRoot));
-        }
-
-        result.sort(Comparator
-                .comparing((SourceRootCtx x) -> x.sourceKind() != SourceKind.BASE)
-                .thenComparing(SourceRootCtx::priority)
-                .thenComparing(SourceRootCtx::sourceName, String.CASE_INSENSITIVE_ORDER));
-
-        return result;
-    }
-
-    private SourceRootCtx toCtx(CodeSourceRoot root) {
-        if (root == null) {
-            throw new IllegalArgumentException("Источник кода не задан");
-        }
-
-        String sourceName = root.getSourceName();
-        if (sourceName == null || sourceName.isBlank()) {
-            sourceName = root.getSourceKind() == SourceKind.EXTENSION
-                    ? "Расширение"
-                    : "Основная конфигурация";
-        }
-
-        Path path = Path.of(root.getRootPath()).toAbsolutePath().normalize();
-        return new SourceRootCtx(root, root.getSourceKind(), sourceName.trim(), path, root.getPriority() == null ? 0 : root.getPriority());
-    }
-
-    private BuildArtifacts scanSources(List<SourceRootCtx> scanRoots, DependencySnapshot snapshot) throws IOException {
+    private BuildArtifacts scanSources(List<DependencySourceRootService.ScanRoot> scanRoots, DependencySnapshot snapshot) throws IOException {
         if (scanRoots == null || scanRoots.isEmpty()) {
             throw new IllegalStateException("Нет источников для сканирования");
         }
 
-        Map<SourceRootCtx, List<Path>> commonModuleFilesByRoot = new LinkedHashMap<>();
-        Map<SourceRootCtx, List<Path>> objectFilesByRoot = new LinkedHashMap<>();
+        DependencySourceRootService.DiscoveredFiles discoveredFiles = dependencySourceRootService.discoverBslFiles(scanRoots);
+        Map<DependencySourceRootService.ScanRoot, List<Path>> commonModuleFilesByRoot = discoveredFiles.commonModuleFilesByRoot();
+        Map<DependencySourceRootService.ScanRoot, List<Path>> objectFilesByRoot = discoveredFiles.objectFilesByRoot();
         List<String> skippedFileMessages = new ArrayList<>();
 
-        int discoveredFiles = 0;
-        for (SourceRootCtx sourceRoot : scanRoots) {
-            if (!Files.isDirectory(sourceRoot.path())) {
-                throw new IllegalStateException("Каталог исходников не найден: " + sourceRoot.path());
-            }
-
-            List<Path> bslFiles;
-            try (Stream<Path> stream = Files.walk(sourceRoot.path())) {
-                bslFiles = stream
-                        .filter(Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".bsl"))
-                        .filter(p -> belongsToAllowedRoot(sourceRoot.path(), p))
-                        .sorted()
-                        .toList();
-            }
-
-            discoveredFiles += bslFiles.size();
-            commonModuleFilesByRoot.put(sourceRoot, bslFiles.stream()
-                    .filter(f -> isRoot(sourceRoot.path(), f, "CommonModules"))
-                    .toList());
-            objectFilesByRoot.put(sourceRoot, bslFiles.stream()
-                    .filter(f -> !isRoot(sourceRoot.path(), f, "CommonModules"))
-                    .toList());
-
+        for (DependencySourceRootService.ScanRoot sourceRoot : scanRoots) {
             saveScanLog(snapshot, "INFO", "DISCOVER", sourceRoot.path().toString(),
-                    "Источник " + sourceRoot.sourceName() + ": найдено файлов=" + bslFiles.size(), null);
+                    "Источник " + sourceRoot.sourceName() + ": найдено файлов="
+                            + (commonModuleFilesByRoot.getOrDefault(sourceRoot, List.of()).size()
+                            + objectFilesByRoot.getOrDefault(sourceRoot, List.of()).size()),
+                    null);
         }
 
         Set<String> knownCommonModules = collectKnownCommonModules(commonModuleFilesByRoot);
@@ -202,14 +137,14 @@ public class DependencyTreeBuildService {
         List<DependencyEdge> edgeBatch = new ArrayList<>(EDGE_BATCH_SIZE);
         List<CommonModuleImpact> impactBatch = new ArrayList<>(IMPACT_BATCH_SIZE);
 
-        for (Map.Entry<SourceRootCtx, List<Path>> entry : commonModuleFilesByRoot.entrySet()) {
-            SourceRootCtx sourceRoot = entry.getKey();
+        for (Map.Entry<DependencySourceRootService.ScanRoot, List<Path>> entry : commonModuleFilesByRoot.entrySet()) {
+            DependencySourceRootService.ScanRoot sourceRoot = entry.getKey();
             for (Path file : entry.getValue()) {
                 String rel = null;
                 String decodedRel = null;
                 try {
-                    rel = normalizeRel(sourceRoot.path().relativize(file));
-                    decodedRel = decodeRelativePath(rel);
+                    rel = dependencySourceRootService.normalizeRelativePath(sourceRoot.path(), file);
+                    decodedRel = dependencySourceRootService.decodeRelativePath(rel);
 
                     String text = readText(file);
                     BslDependencyParser.ParsedCommonModule parsed = bslDependencyParser.parseCommonModule(
@@ -290,21 +225,21 @@ public class DependencyTreeBuildService {
             edgeBatch.clear();
         }
         graph.buildTreeEntries();
-        Map<ObjectRef, List<ObjectFileRef>> objectFilesByOwner = groupObjectFiles(objectFilesByRoot);
+        Map<DependencySourceRootService.ObjectRef, List<ObjectFileRef>> objectFilesByOwner = groupObjectFiles(objectFilesByRoot);
         Map<String, Set<String>> exportMembersByModule = graph.exportMembersByModule();
 
         for (List<ObjectFileRef> ownerFiles : objectFilesByOwner.values()) {
             Set<ImpactKey> objectImpactDedup = new HashSet<>();
 
             for (ObjectFileRef ownerFile : ownerFiles) {
-                SourceRootCtx sourceRoot = ownerFile.sourceRoot();
+                DependencySourceRootService.ScanRoot sourceRoot = ownerFile.sourceRoot();
                 Path file = ownerFile.file();
                 String rel = null;
                 String decodedRel = null;
 
                 try {
-                    rel = normalizeRel(sourceRoot.path().relativize(file));
-                    decodedRel = decodeRelativePath(rel);
+                    rel = dependencySourceRootService.normalizeRelativePath(sourceRoot.path(), file);
+                    decodedRel = dependencySourceRootService.decodeRelativePath(rel);
 
                     String text = readText(file);
                     BslDependencyParser.ParsedObjectUsages parsed = bslDependencyParser.parseObjectExportUsages(
@@ -410,15 +345,25 @@ public class DependencyTreeBuildService {
             impactBatch.clear();
         }
 
-        return new BuildArtifacts(filesProcessed, skippedFiles, skippedFileMessages, edgesSaved, impactsSaved, scanRoots.size(), discoveredFiles);
+        return new BuildArtifacts(
+                filesProcessed,
+                skippedFiles,
+                skippedFileMessages,
+                edgesSaved,
+                impactsSaved,
+                scanRoots.size(),
+                discoveredFiles.discoveredFiles()
+        );
     }
 
-    private Map<ObjectRef, List<ObjectFileRef>> groupObjectFiles(Map<SourceRootCtx, List<Path>> objectFilesByRoot) {
-        Map<ObjectRef, List<ObjectFileRef>> grouped = new LinkedHashMap<>();
-        for (Map.Entry<SourceRootCtx, List<Path>> entry : objectFilesByRoot.entrySet()) {
-            SourceRootCtx sourceRoot = entry.getKey();
+    private Map<DependencySourceRootService.ObjectRef, List<ObjectFileRef>> groupObjectFiles(
+            Map<DependencySourceRootService.ScanRoot, List<Path>> objectFilesByRoot
+    ) {
+        Map<DependencySourceRootService.ObjectRef, List<ObjectFileRef>> grouped = new LinkedHashMap<>();
+        for (Map.Entry<DependencySourceRootService.ScanRoot, List<Path>> entry : objectFilesByRoot.entrySet()) {
+            DependencySourceRootService.ScanRoot sourceRoot = entry.getKey();
             for (Path file : entry.getValue()) {
-                ObjectRef owner = determineObjectRef(sourceRoot.path(), file);
+                DependencySourceRootService.ObjectRef owner = dependencySourceRootService.determineObjectRef(sourceRoot.path(), file);
                 if (owner == null) {
                     continue;
                 }
@@ -428,10 +373,10 @@ public class DependencyTreeBuildService {
         return grouped;
     }
 
-    private Set<String> collectKnownCommonModules(Map<SourceRootCtx, List<Path>> commonModuleFilesByRoot) {
+    private Set<String> collectKnownCommonModules(Map<DependencySourceRootService.ScanRoot, List<Path>> commonModuleFilesByRoot) {
         Set<String> modules = new LinkedHashSet<>();
-        for (Map.Entry<SourceRootCtx, List<Path>> entry : commonModuleFilesByRoot.entrySet()) {
-            SourceRootCtx sourceRoot = entry.getKey();
+        for (Map.Entry<DependencySourceRootService.ScanRoot, List<Path>> entry : commonModuleFilesByRoot.entrySet()) {
+            DependencySourceRootService.ScanRoot sourceRoot = entry.getKey();
             for (Path file : entry.getValue()) {
                 Path rel = sourceRoot.path().relativize(file);
                 if (rel.getNameCount() < 2) {
@@ -443,69 +388,12 @@ public class DependencyTreeBuildService {
         return modules;
     }
 
-    private ObjectRef determineObjectRef(Path sourceRoot, Path file) {
-        Path rel = sourceRoot.relativize(file);
-        if (rel.getNameCount() < 2) {
-            return null;
-        }
-
-        String root = oneCNameDecoder.decodePathSegment(rel.getName(0).toString());
-        String objectName = oneCNameDecoder.decodePathSegment(rel.getName(1).toString());
-
-        DependencyCallerType objectType = switch (root.toLowerCase(Locale.ROOT)) {
-            case "catalogs" -> DependencyCallerType.CATALOG;
-            case "documents" -> DependencyCallerType.DOCUMENT;
-            case "reports" -> DependencyCallerType.REPORT;
-            case "commonforms" -> DependencyCallerType.COMMON_FORM;
-            case "dataprocessors" -> DependencyCallerType.DATA_PROCESSOR;
-            default -> null;
-        };
-
-        if (objectType == null || isBlank(objectName)) {
-            return null;
-        }
-
-        return new ObjectRef(objectType, objectName);
-    }
-
-    private boolean belongsToAllowedRoot(Path sourceRoot, Path file) {
-        Path rel = sourceRoot.relativize(file);
-        if (rel.getNameCount() == 0) {
-            return false;
-        }
-        String first = oneCNameDecoder.decodePathSegment(rel.getName(0).toString());
-        return ALLOWED_ROOTS.contains(first);
-    }
-
-    private boolean isRoot(Path sourceRoot, Path file, String expectedRoot) {
-        Path rel = sourceRoot.relativize(file);
-        if (rel.getNameCount() == 0) {
-            return false;
-        }
-        String first = oneCNameDecoder.decodePathSegment(rel.getName(0).toString());
-        return expectedRoot.equalsIgnoreCase(first);
-    }
-
     private String readText(Path file) throws IOException {
         long size = Files.size(file);
         if (size > MAX_BSL_FILE_SIZE_BYTES) {
             throw new IOException("Файл слишком большой для разбора: " + file + ", size=" + size + " bytes");
         }
         return Files.readString(file, StandardCharsets.UTF_8);
-    }
-
-    private String normalizeRel(Path relPath) {
-        return relPath.toString().replace('\\', '/');
-    }
-
-    private String decodeRelativePath(String relPath) {
-        if (relPath == null || relPath.isBlank()) {
-            return relPath;
-        }
-
-        return Stream.of(relPath.split("/"))
-                .map(oneCNameDecoder::decodePathSegment)
-                .collect(Collectors.joining("/"));
     }
 
     private String buildFinishNotes(BuildArtifacts artifacts) {
@@ -587,19 +475,7 @@ public class DependencyTreeBuildService {
         dependencyScanLogRepository.save(row);
     }
 
-    private record SourceRootCtx(
-            CodeSourceRoot sourceRoot,
-            SourceKind sourceKind,
-            String sourceName,
-            Path path,
-            int priority
-    ) {
-    }
-
-    private record ObjectFileRef(SourceRootCtx sourceRoot, Path file) {
-    }
-
-    private record ObjectRef(DependencyCallerType objectType, String objectName) {
+    private record ObjectFileRef(DependencySourceRootService.ScanRoot sourceRoot, Path file) {
     }
 
     private record BuildArtifacts(
@@ -642,7 +518,7 @@ public class DependencyTreeBuildService {
             BslDependencyParser.AnnotationMode annotationMode,
             boolean continueCall
     ) {
-        static MemberNode from(SourceRootCtx sourceRoot, String moduleName, BslDependencyParser.MemberDefinition member) {
+        static MemberNode from(DependencySourceRootService.ScanRoot sourceRoot, String moduleName, BslDependencyParser.MemberDefinition member) {
             String actualMemberName = member.getMemberName();
             String effectiveMemberName = member.getEffectiveMemberName() == null || member.getEffectiveMemberName().isBlank()
                     ? actualMemberName
@@ -697,7 +573,7 @@ public class DependencyTreeBuildService {
             }
         }
 
-        MemberNode findPhysicalMember(SourceRootCtx sourceRoot, String moduleName, String actualMemberName) {
+        MemberNode findPhysicalMember(DependencySourceRootService.ScanRoot sourceRoot, String moduleName, String actualMemberName) {
             String nodeKey = physicalLookup.get(physicalLookupKey(sourceRoot.sourceKind(), sourceRoot.sourceName(), moduleName, actualMemberName));
             return nodeKey == null ? null : membersByNodeKey.get(nodeKey);
         }

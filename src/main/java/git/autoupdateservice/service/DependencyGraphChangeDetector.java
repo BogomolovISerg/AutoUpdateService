@@ -20,21 +20,23 @@ import java.util.Set;
 public class DependencyGraphChangeDetector {
 
     private final RepoBindingRepository repoBindingRepository;
-    private final GitlabChangesService gitlabChangesService;
     private final DependencyGraphStateService dependencyGraphStateService;
     private final OneCNameDecoder oneCNameDecoder;
     private final AuditLogService auditLogService;
 
     @Transactional
-    public void analyzePushAndMarkStale(String projectPath, String beforeSha, String commitSha, String clientIp) {
+    public void analyzeChangesAndMarkStale(
+            String projectPath,
+            List<GitlabChangesService.ChangedFile> changedFiles,
+            String clientIp
+    ) {
         RepoBinding binding = repoBindingRepository.findByProjectPathAndActiveTrue(projectPath).orElse(null);
         if (binding == null) {
             return;
         }
 
         try {
-            GitlabChangesService.FetchResult fetchResult = gitlabChangesService.fetchFullChanges(projectPath, beforeSha, commitSha);
-            List<DependencyGraphStateService.DirtyModuleHit> hits = extractDirtyCommonModules(fetchResult.files());
+            List<DependencyGraphStateService.DirtyModuleHit> hits = extractDirtyCommonModules(changedFiles);
             if (hits.isEmpty()) {
                 return;
             }
@@ -64,7 +66,7 @@ public class DependencyGraphChangeDetector {
             auditLogService.warn(
                     LogType.WEBHOOK_RECEIVED,
                     "Dependency graph change analysis failed: " + safe(e.getMessage()),
-                    "{\"projectPath\":\"" + esc(projectPath) + "\",\"commitSha\":\"" + esc(commitSha) + "\"}",
+                    "{\"projectPath\":\"" + esc(projectPath) + "\"}",
                     clientIp,
                     "gitlab",
                     null

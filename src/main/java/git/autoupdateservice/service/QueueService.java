@@ -4,11 +4,12 @@ import git.autoupdateservice.domain.*;
 import git.autoupdateservice.repo.RepoBindingRepository;
 import git.autoupdateservice.repo.SettingsRepository;
 import git.autoupdateservice.repo.UpdateTaskRepository;
+import git.autoupdateservice.service.gitlab.GitlabPushEvent;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.stereotype.Service;
 import org.springframework.core.NestedRuntimeException;
+import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -26,66 +27,46 @@ public class QueueService {
     private final AuditLogService auditLogService;
 
     @Transactional
-    public Optional<UpdateTask> enqueueFromWebhook(
-            String projectPath,
-            Long gitProjectId,
-            String gitProjectName,
-            String ref,
-            String branch,
-            String beforeSha,
-            String commitSha,
-            String checkoutSha,
-            String eventName,
-            String objectKind,
-            String userName,
-            String userUsername,
-            String userEmail,
-            Integer totalCommitsCount,
-            String authorName,
-            String authorLogin,
-            String comment,
-            String sourceKey,
-            String clientIp
-    ) {
-        var bindingOpt = repoBindingRepository.findByProjectPathAndActiveTrue(projectPath);
+    public Optional<UpdateTask> enqueueFromWebhook(GitlabPushEvent event, String clientIp) {
+        var bindingOpt = repoBindingRepository.findByProjectPathAndActiveTrue(event.projectPath());
         if (bindingOpt.isEmpty()) {
             auditLogService.warn(
                     LogType.UNMAPPED_REPO_EVENT,
-                    "Webhook event for unmapped repo: " + projectPath,
-                    "{\"projectPath\":\"" + esc(projectPath) + "\",\"commitSha\":\"" + esc(commitSha) + "\"}",
+                    "Webhook event for unmapped repo: " + event.projectPath(),
+                    "{\"projectPath\":\"" + esc(event.projectPath()) + "\",\"commitSha\":\"" + esc(event.commitSha()) + "\"}",
                     clientIp, "gitlab", null
             );
             return Optional.empty();
         }
 
         var binding = bindingOpt.get();
-        settingsRepository.findById(1L).orElseThrow();
+        var settings = settingsRepository.findById(1L).orElseThrow();
 
-        LocalDate scheduledFor = LocalDate.now();
+        LocalDate scheduledFor = LocalDate.now(resolveZone(settings.getTimezone()));
         UpdateTask t = new UpdateTask();
         t.setRepoBinding(binding);
         t.setTargetType(binding.getTargetType());
         t.setExtensionName(binding.getExtensionName());
         t.setRepoPath(binding.getRepoPath());
-        t.setProjectPath(projectPath);
-        t.setGitProjectId(gitProjectId);
-        t.setGitProjectName(gitProjectName);
-        t.setGitRef(ref);
-        t.setGitCheckoutSha(checkoutSha);
-        t.setGitEventName(eventName);
-        t.setGitObjectKind(objectKind);
-        t.setGitUserName(userName);
-        t.setGitUserUsername(userUsername);
-        t.setGitUserEmail(userEmail);
-        t.setGitTotalCommitsCount(totalCommitsCount);
+        t.setProjectPath(event.projectPath());
+        t.setGitProjectId(event.projectId());
+        t.setGitProjectName(event.projectName());
+        t.setGitRef(event.ref());
+        t.setGitCheckoutSha(event.checkoutSha());
+        t.setGitEventName(event.eventName());
+        t.setGitObjectKind(event.objectKind());
+        t.setGitUserName(event.pusherName());
+        t.setGitUserUsername(event.pusherLogin());
+        t.setGitUserEmail(event.userEmail());
+        t.setGitTotalCommitsCount(event.totalCommitsCount());
         t.setGitWebhookReceivedAt(OffsetDateTime.now());
-        t.setBranch(branch);
-        t.setBeforeSha(beforeSha);
-        t.setCommitSha(commitSha);
-        t.setAuthorName(authorName);
-        t.setAuthorLogin(authorLogin);
-        t.setComment(comment);
-        t.setSourceKey(sourceKey);
+        t.setBranch(event.branch());
+        t.setBeforeSha(event.beforeSha());
+        t.setCommitSha(event.commitSha());
+        t.setAuthorName(event.authorName());
+        t.setAuthorLogin(event.authorLogin());
+        t.setComment(event.comment());
+        t.setSourceKey(event.sourceKey());
         t.setStatus(TaskStatus.NEW);
         t.setScheduledFor(scheduledFor);
         t.setCreatedAt(OffsetDateTime.now());
@@ -99,7 +80,7 @@ public class QueueService {
                     LogType.TASK_ENQUEUED,
                     "Task enqueued: " + binding.getTargetType() +
                             (binding.getExtensionName() != null ? " (" + binding.getExtensionName() + ")" : ""),
-                    "{\"taskId\":\"" + saved.getId() + "\",\"projectPath\":\"" + esc(projectPath) + "\",\"beforeSha\":\"" + esc(beforeSha) + "\",\"commitSha\":\"" + esc(commitSha) + "\",\"scheduledFor\":\"" + scheduledFor + "\"}",
+                    "{\"taskId\":\"" + saved.getId() + "\",\"projectPath\":\"" + esc(event.projectPath()) + "\",\"beforeSha\":\"" + esc(event.beforeSha()) + "\",\"commitSha\":\"" + esc(event.commitSha()) + "\",\"scheduledFor\":\"" + scheduledFor + "\"}",
                     clientIp, "gitlab", null
             );
 
@@ -109,7 +90,7 @@ public class QueueService {
             auditLogService.warn(
                     LogType.TASK_ENQUEUED, // если хотите — заведите отдельный LogType, например TASK_DUPLICATE_IGNORED
                     "Task not inserted (duplicate/constraint): " + safeMsg(e),
-                    "{\"sourceKey\":\"" + esc(sourceKey) + "\",\"projectPath\":\"" + esc(projectPath) + "\",\"commitSha\":\"" + esc(commitSha) + "\"}",
+                    "{\"sourceKey\":\"" + esc(event.sourceKey()) + "\",\"projectPath\":\"" + esc(event.projectPath()) + "\",\"commitSha\":\"" + esc(event.commitSha()) + "\"}",
                     clientIp, "gitlab", null
             );
             return Optional.empty();
@@ -157,5 +138,13 @@ public class QueueService {
         if (msg == null) msg = "unknown";
         msg = msg.replace("\n", " ").replace("\r", " ");
         return msg.length() > 500 ? msg.substring(0, 500) : msg;
+    }
+
+    private static ZoneId resolveZone(String timezone) {
+        try {
+            return ZoneId.of(timezone);
+        } catch (Exception e) {
+            return ZoneId.systemDefault();
+        }
     }
 }
