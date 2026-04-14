@@ -21,6 +21,7 @@ import java.util.List;
  *  - always: выполнять ли шаг в finally (по умолчанию false)
  *  - foreach: "extensions" — выполнить шаг для каждого расширения
  *  - condition: "needMain" — выполнить только если есть задачи MAIN
+ *  - special: "extensionPlans" — выполнить шаги из extension JSON по маске extensionPlanFilePattern
  *
  *  - retry: (опционально) режим "проверка с повторами" — полезно для session closed
  *      - maxAttempts: 0 => брать из Settings.closedMaxAttempts
@@ -43,6 +44,9 @@ public class RunStepDef {
 
     private String foreach;     // e.g. "extensions"
     private String condition;   // e.g. "needMain"
+    @JsonAlias({"action", "builtin"})
+    private String special;     // e.g. "extensionPlans"
+    private String phase;       // legacy compatibility, ignored by executor
 
     private List<String> command;
 

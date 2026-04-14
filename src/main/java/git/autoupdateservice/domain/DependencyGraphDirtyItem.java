@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
@@ -30,8 +31,14 @@ public class DependencyGraphDirtyItem {
     @Column(name = "changed_path", nullable = false, length = 2000)
     private String changedPath;
 
+    @Column(name = "business_date", nullable = false)
+    private LocalDate businessDate = LocalDate.now();
+
     @Column(name = "detected_at", nullable = false)
     private OffsetDateTime detectedAt = OffsetDateTime.now();
+
+    @Column(name = "last_detected_at", nullable = false)
+    private OffsetDateTime lastDetectedAt = OffsetDateTime.now();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)

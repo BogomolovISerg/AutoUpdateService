@@ -60,11 +60,11 @@ public class SettingsService {
         Settings s = settingsRepository.findById(1L).orElseThrow();
 
         s.setAutoUpdateEnabled(patch.isAutoUpdateEnabled());
-        s.setRunTime(patch.getRunTime());
-        s.setNextRunDate(patch.getNextRunDate());
+        s.setTestRunTime(patch.getTestRunTime());
+        s.setNextTestRunDate(patch.getNextTestRunDate());
+        s.setProductionRunTime(patch.getProductionRunTime());
+        s.setNextProductionRunDate(patch.getNextProductionRunDate());
         s.setTimezone(patch.getTimezone());
-        s.setLockMessage(patch.getLockMessage());
-        s.setUccode(patch.getUccode());
         s.setClosedMaxAttempts(patch.getClosedMaxAttempts());
         s.setClosedSleepSeconds(patch.getClosedSleepSeconds());
 

@@ -32,20 +32,10 @@
                     <p class="small">Новых задач в очереди сейчас: <b th:text="${pendingNewCount}">0</b></p>
                 </div>
 
-                <div class="col-12">
-                    <label>Сообщение блокировки</label>
-                    <input class="input" type="text" th:field="*{lockMessage}"/>
-                </div>
-
                 <div class="col-6">
                     <label>Дата ближайшего запуска тестовой базы</label>
                     <input class="input" type="date" th:field="*{nextTestRunDate}"/>
                 </div>
-                <div class="col-6">
-                    <label>Код блокировки</label>
-                    <input class="input" type="text" th:field="*{uccode}"/>
-                </div>
-
                 <div class="col-6">
                     <label>Время запуска тестовой базы</label>
                     <input class="input" type="time" th:field="*{testRunTime}"/>

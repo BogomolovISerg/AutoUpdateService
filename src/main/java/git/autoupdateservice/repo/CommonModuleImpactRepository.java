@@ -2,6 +2,7 @@ package git.autoupdateservice.repo;
 
 import git.autoupdateservice.domain.CommonModuleImpact;
 import git.autoupdateservice.domain.DependencySnapshot;
+import git.autoupdateservice.domain.SourceKind;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,6 +24,21 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
     List<CommonModuleImpact> findBySnapshotAndCommonModuleNameInIgnoreCase(
             @Param("snapshot") DependencySnapshot snapshot,
             @Param("moduleNamesLower") Collection<String> moduleNamesLower
+    );
+
+    @Query("""
+           select c
+           from CommonModuleImpact c
+           where c.snapshot = :snapshot
+             and c.sourceKind = :sourceKind
+             and c.sourceName = :sourceName
+             and lower(c.commonModuleName) = :moduleNameLower
+           """)
+    List<CommonModuleImpact> findBySnapshotAndSourceKindAndSourceNameAndCommonModuleNameIgnoreCase(
+            @Param("snapshot") DependencySnapshot snapshot,
+            @Param("sourceKind") SourceKind sourceKind,
+            @Param("sourceName") String sourceName,
+            @Param("moduleNameLower") String moduleNameLower
     );
 
     @Query(value = """

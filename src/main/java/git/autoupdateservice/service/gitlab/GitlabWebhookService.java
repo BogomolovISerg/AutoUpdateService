@@ -4,6 +4,7 @@ import git.autoupdateservice.config.GitlabProperties;
 import git.autoupdateservice.domain.LogType;
 import git.autoupdateservice.domain.UpdateTask;
 import git.autoupdateservice.service.AuditLogService;
+import git.autoupdateservice.service.ChangedObjectService;
 import git.autoupdateservice.service.DependencyGraphChangeDetector;
 import git.autoupdateservice.service.GitlabChangesService;
 import git.autoupdateservice.service.QueueService;
@@ -27,6 +28,7 @@ public class GitlabWebhookService {
     private final GitlabChangesService gitlabChangesService;
     private final TaskChangedFileService taskChangedFileService;
     private final DependencyGraphChangeDetector dependencyGraphChangeDetector;
+    private final ChangedObjectService changedObjectService;
 
     public GitlabWebhookResult handleWebhook(
             String token,
@@ -84,9 +86,17 @@ public class GitlabWebhookService {
 
         Optional<UpdateTask> enqueued = queueService.enqueueFromWebhook(pushEvent, clientIp);
         GitlabChangesService.FetchResult fetchResult = fetchFullChanges(pushEvent, clientIp);
+        if (fetchResult == null) {
+            fetchResult = fallbackWebhookChanges(pushEvent, body, clientIp);
+        }
         if (fetchResult != null) {
-            enqueued.ifPresent(task -> storeFetchedChanges(task, fetchResult, clientIp));
-            dependencyGraphChangeDetector.analyzeChangesAndMarkStale(pushEvent.projectPath(), fetchResult.files(), clientIp);
+            GitlabChangesService.FetchResult finalFetchResult = fetchResult;
+            enqueued.ifPresent(task -> storeFetchedChanges(task, finalFetchResult, clientIp));
+            DependencyGraphChangeDetector.ChangeAnalysis analysis =
+                    dependencyGraphChangeDetector.analyzeChangesAndMarkStale(pushEvent.projectPath(), finalFetchResult.files(), clientIp);
+            if (analysis.hasDirectObjects()) {
+                enqueued.ifPresent(task -> changedObjectService.registerDirectObjects(task, analysis.directObjects(), clientIp));
+            }
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -136,6 +146,34 @@ public class GitlabWebhookService {
             );
             return null;
         }
+    }
+
+    private GitlabChangesService.FetchResult fallbackWebhookChanges(
+            GitlabPushEvent pushEvent,
+            Map<String, Object> body,
+            String clientIp
+    ) {
+        var files = gitlabPushEventParser.extractChangedFiles(body);
+        if (files.isEmpty()) {
+            return null;
+        }
+
+        auditLogService.warn(
+                LogType.WEBHOOK_RECEIVED,
+                "Полный список изменений недоступен, используется список файлов из webhook payload",
+                "{\"projectPath\":\"" + esc(pushEvent.projectPath()) + "\",\"files\":" + files.size() + "}",
+                clientIp,
+                "gitlab",
+                null
+        );
+
+        return new GitlabChangesService.FetchResult(
+                files,
+                pushEvent.totalCommitsCount() == null ? 0 : pushEvent.totalCommitsCount(),
+                false,
+                false,
+                "webhook-payload"
+        );
     }
 
     private static String esc(String value) {

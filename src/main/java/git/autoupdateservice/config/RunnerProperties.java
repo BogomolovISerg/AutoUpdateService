@@ -26,5 +26,7 @@ public record RunnerProperties(
         // Some installations prefer a different 1C connection format for repo operations (e.g. /S...).
         // Bindable from runner.ib-connectionrepo / runner.ib-connection-repo / RUNNER_CONNECTIONREPO, etc.
         String ibConnectionrepo,
-        int keepDays
+        int keepDays,
+        String testPlanFile,
+        String productionPlanFile
 ) {}

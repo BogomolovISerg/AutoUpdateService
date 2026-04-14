@@ -64,8 +64,10 @@ public class SettingsController {
     @Data
     public static class SettingsForm {
         public boolean autoUpdateEnabled;
-        public LocalTime runTime;
-        public LocalDate nextRunDate;
+        public LocalTime testRunTime;
+        public LocalDate nextTestRunDate;
+        public LocalTime productionRunTime;
+        public LocalDate nextProductionRunDate;
         public String timezone;
         public String lockMessage;
         public String uccode;
@@ -80,8 +82,10 @@ public class SettingsController {
         static SettingsForm from(Settings s) {
             SettingsForm f = new SettingsForm();
             f.autoUpdateEnabled = s.isAutoUpdateEnabled();
-            f.runTime = s.getRunTime();
-            f.nextRunDate = s.getNextRunDate();
+            f.testRunTime = s.getTestRunTime();
+            f.nextTestRunDate = s.getNextTestRunDate();
+            f.productionRunTime = s.getProductionRunTime();
+            f.nextProductionRunDate = s.getNextProductionRunDate();
             f.timezone = s.getTimezone();
             f.lockMessage = s.getLockMessage();
             f.uccode = s.getUccode();
@@ -97,8 +101,10 @@ public class SettingsController {
             Settings s = new Settings();
             s.setId(1L);
             s.setAutoUpdateEnabled(autoUpdateEnabled);
-            s.setRunTime(runTime);
-            s.setNextRunDate(nextRunDate);
+            s.setTestRunTime(testRunTime);
+            s.setNextTestRunDate(nextTestRunDate);
+            s.setProductionRunTime(productionRunTime);
+            s.setNextProductionRunDate(nextProductionRunDate);
             s.setTimezone(timezone);
             s.setLockMessage(lockMessage);
             s.setUccode(uccode);

@@ -47,6 +47,7 @@ public class QueueService {
         t.setRepoBinding(binding);
         t.setTargetType(binding.getTargetType());
         t.setExtensionName(binding.getExtensionName());
+        t.setExtensionPlanFileKey(binding.getExtensionPlanFileKey());
         t.setRepoPath(binding.getRepoPath());
         t.setProjectPath(event.projectPath());
         t.setGitProjectId(event.projectId());
@@ -105,8 +106,8 @@ public class QueueService {
         }
 
         TaskStatus before = t.getStatus();
-        if (before == TaskStatus.NEW) t.setStatus(TaskStatus.CANCELED);
-        else if (before == TaskStatus.CANCELED) t.setStatus(TaskStatus.NEW);
+        if (before == TaskStatus.CANCELED) t.setStatus(TaskStatus.NEW);
+        else t.setStatus(TaskStatus.CANCELED);
 
         t.setUpdatedAt(OffsetDateTime.now());
         UpdateTask saved = updateTaskRepository.saveAndFlush(t);

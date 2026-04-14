@@ -18,11 +18,17 @@ public class Settings {
     @Column(name = "auto_update_enabled", nullable = false)
     private boolean autoUpdateEnabled = true;
 
-    @Column(name = "run_time", nullable = false)
-    private LocalTime runTime = LocalTime.of(2, 0);
+    @Column(name = "test_run_time", nullable = false)
+    private LocalTime testRunTime = LocalTime.of(2, 0);
 
-    @Column(name = "next_run_date")
-    private LocalDate nextRunDate;
+    @Column(name = "next_test_run_date")
+    private LocalDate nextTestRunDate;
+
+    @Column(name = "production_run_time", nullable = false)
+    private LocalTime productionRunTime = LocalTime.of(4, 0);
+
+    @Column(name = "next_production_run_date")
+    private LocalDate nextProductionRunDate;
 
     @Column(name = "timezone", nullable = false, length = 60)
     private String timezone = "Europe/Zurich";

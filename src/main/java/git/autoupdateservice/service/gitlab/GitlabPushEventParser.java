@@ -1,8 +1,12 @@
 package git.autoupdateservice.service.gitlab;
 
+import git.autoupdateservice.config.GitChangeType;
+import git.autoupdateservice.service.GitlabChangesService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +29,28 @@ public class GitlabPushEventParser {
 
     public String eventName(Map<String, Object> body) {
         return body == null ? null : asString(body.get("event_name"));
+    }
+
+    public List<GitlabChangesService.ChangedFile> extractChangedFiles(Map<String, Object> body) {
+        if (body == null) {
+            return List.of();
+        }
+
+        LinkedHashMap<String, GitlabChangesService.ChangedFile> files = new LinkedHashMap<>();
+        Object commitsObj = body.get("commits");
+        if (commitsObj instanceof List<?> commits) {
+            for (Object item : commits) {
+                Map<String, Object> commit = asMap(item);
+                if (commit == null) {
+                    continue;
+                }
+                collectFiles(files, commit.get("added"), GitChangeType.ADDED, false);
+                collectFiles(files, commit.get("modified"), GitChangeType.MODIFIED, false);
+                collectFiles(files, commit.get("removed"), GitChangeType.REMOVED, true);
+            }
+        }
+
+        return new ArrayList<>(files.values());
     }
 
     public GitlabPushEvent parse(String eventHeader, Map<String, Object> body) {
@@ -250,5 +276,26 @@ public class GitlabPushEventParser {
     }
 
     private record CommitMeta(String authorName, String message) {
+    }
+
+    private void collectFiles(
+            Map<String, GitlabChangesService.ChangedFile> target,
+            Object filesObj,
+            GitChangeType changeType,
+            boolean removed
+    ) {
+        if (!(filesObj instanceof List<?> files)) {
+            return;
+        }
+        for (Object item : files) {
+            String path = asString(item);
+            if (!StringUtils.hasText(path)) {
+                continue;
+            }
+            GitlabChangesService.ChangedFile changedFile = removed
+                    ? new GitlabChangesService.ChangedFile(changeType, path, null)
+                    : new GitlabChangesService.ChangedFile(changeType, null, path);
+            target.putIfAbsent(changeType + "|" + path, changedFile);
+        }
     }
 }

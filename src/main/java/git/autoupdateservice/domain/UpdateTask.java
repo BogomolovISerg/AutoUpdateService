@@ -31,6 +31,9 @@ public class UpdateTask {
     @Column(name = "extension_name", length = 200)
     private String extensionName;
 
+    @Column(name = "extension_plan_file_key", length = 200)
+    private String extensionPlanFileKey;
+
     @Column(name = "repo_path", nullable = false, length = 1000)
     private String repoPath;
 

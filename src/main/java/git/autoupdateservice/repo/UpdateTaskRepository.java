@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,6 +25,8 @@ public interface UpdateTaskRepository extends JpaRepository<UpdateTask, UUID> {
 
     @Query("select t from UpdateTask t where t.status = :status order by t.createdAt asc")
     List<UpdateTask> findReadyToRun(TaskStatus status);
+
+    List<UpdateTask> findByStatusInOrderByCreatedAtAsc(Collection<TaskStatus> statuses);
 
     @Query("select t from UpdateTask t " +
             "where t.scheduledFor >= coalesce(:from, t.scheduledFor) " +

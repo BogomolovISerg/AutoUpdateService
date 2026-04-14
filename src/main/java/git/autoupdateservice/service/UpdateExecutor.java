@@ -5,6 +5,7 @@ import git.autoupdateservice.domain.*;
 import git.autoupdateservice.repo.ExecutionRunRepository;
 import git.autoupdateservice.repo.SettingsRepository;
 import git.autoupdateservice.repo.UpdateTaskRepository;
+import git.autoupdateservice.service.steps.RunPlan;
 import git.autoupdateservice.service.steps.RunStepCommandService;
 import git.autoupdateservice.service.steps.RunStepDef;
 import git.autoupdateservice.service.steps.RunStepExecutor;
@@ -13,7 +14,10 @@ import git.autoupdateservice.util.PasswordMasker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -21,7 +25,6 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class UpdateExecutor {
-
     private final SettingsRepository settingsRepository;
     private final UpdateTaskRepository updateTaskRepository;
     private final ExecutionRunRepository executionRunRepository;
@@ -34,6 +37,8 @@ public class UpdateExecutor {
     private final JdbcTemplate jdbcTemplate;
     private final RunnerLogsCleanupService runnerLogsCleanupService;
     private final DependencyGraphStateService dependencyGraphStateService;
+    private final ChangedObjectService changedObjectService;
+    private final SmokeTestConfigService smokeTestConfigService;
 
     private boolean tryAcquireRunLock() {
         Boolean ok = jdbcTemplate.queryForObject("select pg_try_advisory_lock(987654321)", Boolean.class);
@@ -44,19 +49,20 @@ public class UpdateExecutor {
         jdbcTemplate.queryForObject("select pg_advisory_unlock(987654321)", Boolean.class);
     }
 
-    public Optional<ExecutionRun> runNightly(OffsetDateTime plannedFor) {
+    public Optional<ExecutionRun> runScheduled(RunStage stage, OffsetDateTime plannedFor) {
 
         if (!tryAcquireRunLock()) return Optional.empty();
 
         try {
 
-            if (executionRunRepository.findByPlannedFor(plannedFor).isPresent()) return Optional.empty();
+            if (executionRunRepository.findByPlannedForAndStage(plannedFor, stage).isPresent()) return Optional.empty();
 
             DependencyGraphState graphState = dependencyGraphStateService.getState();
             DependencySnapshot activeSnapshot = graphState.getActiveSnapshot();
 
             ExecutionRun run = new ExecutionRun();
             run.setPlannedFor(plannedFor);
+            run.setStage(stage);
             run.setStartedAt(OffsetDateTime.now());
             run.setStatus(RunStatus.RUNNING);
             run.setDependencySnapshot(activeSnapshot);
@@ -66,6 +72,7 @@ public class UpdateExecutor {
                     LogType.RUN_STARTED,
                     "Run started for planned_for=" + plannedFor,
                     "{\"runId\":" + j(String.valueOf(run.getId()))
+                            + ",\"stage\":" + j(stage.name())
                             + ",\"plannedFor\":" + j(String.valueOf(plannedFor))
                             + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
                             + ",\"graphStale\":" + graphState.isGraphIsStale() + "}",
@@ -121,24 +128,21 @@ public class UpdateExecutor {
 
 
             Settings s = settingsRepository.findById(1L).orElseThrow();
+            RunPlan plan = stepPlanLoader.loadPlan(stage);
 
-            List<UpdateTask> tasks = updateTaskRepository.findReadyToRun(TaskStatus.NEW);
+            List<UpdateTask> tasks = loadTasksForStage(stage);
             if (tasks.isEmpty()) {
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
                 executionRunRepository.save(run);
-                auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{\"status\":\"NEW\"}", null, "system", run.getId());
+                auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{\"stage\":" + j(stage.name()) + "}", null, "system", run.getId());
                 return Optional.of(run);
             }
 
             boolean needMain = tasks.stream().anyMatch(t -> t.getTargetType() == TargetType.MAIN);
             List<UpdateTask> extTasks = tasks.stream().filter(t -> t.getTargetType() == TargetType.EXTENSION).toList();
-            List<String> extensions = extTasks.stream()
-                    .map(UpdateTask::getExtensionName)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .sorted()
-                    .toList();
+            List<String> extensions = resolveExtensions(extTasks);
+            Map<String, String> extPlanFileKeyByName = resolveExtensionPlanFileKeys(extTasks);
 
             Path logRoot = Path.of(runnerProperties.logDir());
             Path runDir = logRoot.resolve("run-" + run.getId());
@@ -155,7 +159,10 @@ public class UpdateExecutor {
                         .orElse(null);
 
                 if (mainRepoPath == null || mainRepoPath.isBlank()) {
-                    mainRepoPath = runnerProperties.mainRepoPath();
+                    mainRepoPath = firstNonBlank(
+                            runStepCommandService.planValue(plan.getSettings(), "mainRepoPath", "main-repo-path"),
+                            runnerProperties.mainRepoPath()
+                    );
                 }
             }
 
@@ -167,40 +174,38 @@ public class UpdateExecutor {
                     extRepoByName.putIfAbsent(ext, repo);
                 }
             }
-            List<RunStepDef> plan = stepPlanLoader.loadSteps();
 
-            List<RunStepDef> normalSteps = plan.stream()
-                    .filter(RunStepDef::isEnabled)
-                    .filter(sd -> !sd.isAlways())
-                    .sorted(Comparator.comparingInt(RunStepDef::getOrder))
-                    .toList();
-
-            List<RunStepDef> alwaysSteps = plan.stream()
-                    .filter(RunStepDef::isEnabled)
-                    .filter(RunStepDef::isAlways)
-                    .sorted(Comparator.comparingInt(RunStepDef::getOrder))
-                    .toList();
+            List<RunStepDef> orderedSteps = collectOrderedSteps(plan);
+            List<RunStepDef> alwaysSteps = collectAlwaysSteps(plan);
+            Set<RunStepDef> executedAlwaysSteps = new LinkedHashSet<>();
 
             try {
-                //for (RunStepDef sd : normalSteps) {
-                //    executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
-                if (!normalSteps.isEmpty()) {
-                    RunStepDef firstStep = normalSteps.get(0);
-                    executeFirstStepWithRetry(run, s, firstStep, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
-
-                    for (int i = 1; i < normalSteps.size(); i++) {
-                        RunStepDef sd = normalSteps.get(i);
-                        executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                if (stage == RunStage.TEST) {
+                    Path smokeConfigFile = smokeTestConfigService.generateForTesting(plan, run, workDir);
+                    plan.getSettings().put("xunitConfigFile", smokeConfigFile.toString());
+                    plan.getSettings().put("xunit-config-file", smokeConfigFile.toString());
+                    plan.getSettings().put("smokeConfigFile", smokeConfigFile.toString());
+                    plan.getSettings().put("smoke-config-file", smokeConfigFile.toString());
+                    String testResultFile = plan.getTestResultFile();
+                    if (StringUtils.hasText(testResultFile)) {
+                        plan.getSettings().put("testResultFile", testResultFile);
+                        plan.getSettings().put("test-result-file", testResultFile);
                     }
+                }
 
+                executePlanSteps(run, s, plan, orderedSteps, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir, true, executedAlwaysSteps);
+
+                if (stage == RunStage.TEST) {
+                    verifyTestResult(run, s, plan, needMain, mainRepoPath, extRepoByName, runDir, workDir);
                 }
 
                 OffsetDateTime now = OffsetDateTime.now();
                 for (UpdateTask t : tasks) {
-                    t.setStatus(TaskStatus.UPDATED);
+                    t.setStatus(successStatus(stage));
                     t.setUpdatedAt(now);
                 }
                 updateTaskRepository.saveAll(tasks);
+                afterStageSuccess(stage);
 
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
@@ -208,18 +213,19 @@ public class UpdateExecutor {
 
                 auditLogService.info(LogType.RUN_FINISHED,
                         "Run finished successfully. tasks=" + tasks.size(),
-                        "{\"updatedTasks\":" + tasks.size() + ",\"needMain\":" + needMain + ",\"extensions\":" + extensions.size() + "}",
+                        "{\"stage\":" + j(stage.name()) + ",\"updatedTasks\":" + tasks.size() + ",\"needMain\":" + needMain + ",\"extensions\":" + extensions.size() + "}",
                         null, "system", run.getId());
 
                 return Optional.of(run);
             } catch (Exception e) {
+                afterStageFailure(stage, tasks);
                 run.setStatus(RunStatus.FAILED);
                 run.setFinishedAt(OffsetDateTime.now());
                 run.setErrorSummary(trim(PasswordMasker.maskText(e.getMessage()), 3500));
                 executionRunRepository.save(run);
 
                 auditLogService.error(LogType.RUN_FINISHED, "Run failed: " + e.getMessage(),
-                        "{\"error\":" + j(String.valueOf(e.getMessage())) + "}", null, "system", run.getId());
+                        "{\"stage\":" + j(stage.name()) + ",\"error\":" + j(String.valueOf(e.getMessage())) + "}", null, "system", run.getId());
 
                 return Optional.of(run);
             } finally {
@@ -227,7 +233,9 @@ public class UpdateExecutor {
                 try {
                     Settings s2 = settingsRepository.findById(1L).orElseThrow();
                     for (RunStepDef sd : alwaysSteps) {
-                        tryExecutePlannedStepIgnore(run, s2, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                        if (!executedAlwaysSteps.contains(sd)) {
+                            tryExecutePlannedStepIgnore(run, s2, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
+                        }
                     }
                 } catch (Exception ignored) {}
             }
@@ -240,13 +248,17 @@ public class UpdateExecutor {
     private void executeFirstStepWithRetry(
             ExecutionRun run,
             Settings s,
+            RunPlan plan,
             RunStepDef firstStep,
             boolean needMain,
             String mainRepoPath,
             Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
             List<String> extensions,
             Path runDir,
-            Path workDir
+            Path workDir,
+            boolean allowSpecialExtensionPlans,
+            Set<RunStepDef> executedAlwaysSteps
     ) throws Exception {
 
         final int maxAttempts = 3;
@@ -266,7 +278,7 @@ public class UpdateExecutor {
                     );
                 }
 
-                executePlannedStep(run, s, firstStep, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+                executeConfiguredStep(run, s, plan, firstStep, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir, allowSpecialExtensionPlans, executedAlwaysSteps);
                 return;
             } catch (Exception e) {
                 lastError = e;
@@ -296,13 +308,129 @@ public class UpdateExecutor {
             throw lastError;
         }
     }
-    private void executePlannedStep(
+
+    private void executePlanSteps(
             ExecutionRun run,
             Settings s,
+            RunPlan plan,
+            List<RunStepDef> orderedSteps,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
+            List<String> extensions,
+            Path runDir,
+            Path workDir,
+            boolean allowSpecialExtensionPlans,
+            Set<RunStepDef> executedAlwaysSteps
+    ) throws Exception {
+        if (orderedSteps == null || orderedSteps.isEmpty()) {
+            return;
+        }
+
+        RunStepDef firstStep = orderedSteps.get(0);
+        executeFirstStepWithRetry(run, s, plan, firstStep, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir, allowSpecialExtensionPlans, executedAlwaysSteps);
+
+        for (int i = 1; i < orderedSteps.size(); i++) {
+            RunStepDef sd = orderedSteps.get(i);
+            executeConfiguredStep(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir, allowSpecialExtensionPlans, executedAlwaysSteps);
+        }
+    }
+
+    private void executeExtensionPlans(
+            ExecutionRun run,
+            Settings s,
+            RunPlan basePlan,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
+            List<String> extensions,
+            Path runDir,
+            Path workDir
+    ) throws Exception {
+        for (String ext : extensions) {
+            String extFile = resolveExtensionPlanFileKey(extPlanFileKeyByName, ext);
+            RunPlan extPlan = stepPlanLoader.loadExtensionPlan(basePlan, ext, extFile)
+                    .orElseThrow(() -> new IllegalStateException("Extension plan pattern is not configured for extension=" + ext));
+            Map<String, String> singleExtFileKey = Map.of(ext, extFile);
+
+            List<RunStepDef> orderedSteps = collectOrderedSteps(extPlan);
+            List<RunStepDef> alwaysSteps = collectAlwaysSteps(extPlan);
+            Set<RunStepDef> executedAlwaysSteps = new LinkedHashSet<>();
+
+            try {
+                executePlanSteps(run, s, extPlan, orderedSteps, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir, false, executedAlwaysSteps);
+                verifyTestResult(run, s, extPlan, needMain, mainRepoPath, extRepoByName, runDir, workDir);
+            } finally {
+                for (RunStepDef sd : alwaysSteps) {
+                    if (!executedAlwaysSteps.contains(sd)) {
+                        tryExecutePlannedStepIgnore(run, s, extPlan, sd, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir);
+                    }
+                }
+            }
+        }
+    }
+
+    private List<RunStepDef> collectOrderedSteps(RunPlan plan) {
+        List<RunStepDef> steps = plan == null || plan.getSteps() == null ? List.of() : plan.getSteps();
+        return steps.stream()
+                .filter(RunStepDef::isEnabled)
+                .sorted(Comparator.comparingInt(RunStepDef::getOrder))
+                .toList();
+    }
+
+    private List<RunStepDef> collectAlwaysSteps(RunPlan plan) {
+        List<RunStepDef> steps = plan == null || plan.getSteps() == null ? List.of() : plan.getSteps();
+        return steps.stream()
+                .filter(RunStepDef::isEnabled)
+                .filter(RunStepDef::isAlways)
+                .sorted(Comparator.comparingInt(RunStepDef::getOrder))
+                .toList();
+    }
+
+    private void executeConfiguredStep(
+            ExecutionRun run,
+            Settings s,
+            RunPlan plan,
             RunStepDef sd,
             boolean needMain,
             String mainRepoPath,
             Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
+            List<String> extensions,
+            Path runDir,
+            Path workDir,
+            boolean allowSpecialExtensionPlans,
+            Set<RunStepDef> executedAlwaysSteps
+    ) throws Exception {
+        if (isExtensionPlansStep(sd)) {
+            if (!allowSpecialExtensionPlans) {
+                throw new IllegalStateException("Special step extensionPlans is not supported inside extension plan");
+            }
+            if (!extensions.isEmpty()) {
+                executeExtensionPlans(run, s, plan, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
+            }
+            if (sd.isAlways()) {
+                executedAlwaysSteps.add(sd);
+            }
+            return;
+        }
+
+        executePlannedStep(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
+        if (sd.isAlways()) {
+            executedAlwaysSteps.add(sd);
+        }
+    }
+    private void executePlannedStep(
+            ExecutionRun run,
+            Settings s,
+            RunPlan plan,
+            RunStepDef sd,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
             List<String> extensions,
             Path runDir,
             Path workDir
@@ -321,27 +449,29 @@ public class UpdateExecutor {
         String foreach = norm(sd.getForeach());
         if ("extensions".equals(foreach)) {
             for (String ext : extensions) {
-                executePlannedStepSingle(run, s, sd, needMain, mainRepoPath, extRepoByName, runDir, workDir, ext);
+                executePlannedStepSingle(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, runDir, workDir, ext);
             }
             return;
         }
 
-        executePlannedStepSingle(run, s, sd, needMain, mainRepoPath, extRepoByName, runDir, workDir, null);
+        executePlannedStepSingle(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, runDir, workDir, null);
     }
 
     private void tryExecutePlannedStepIgnore(
             ExecutionRun run,
             Settings s,
+            RunPlan plan,
             RunStepDef sd,
             boolean needMain,
             String mainRepoPath,
             Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
             List<String> extensions,
             Path runDir,
             Path workDir
     ) {
         try {
-            executePlannedStep(run, s, sd, needMain, mainRepoPath, extRepoByName, extensions, runDir, workDir);
+            executePlannedStep(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
         } catch (Exception e) {
             auditLogService.warn(
                     LogType.STEP_FAILED,
@@ -355,20 +485,25 @@ public class UpdateExecutor {
     private void executePlannedStepSingle(
             ExecutionRun run,
             Settings s,
+            RunPlan plan,
             RunStepDef sd,
             boolean needMain,
             String mainRepoPath,
             Map<String, String> extRepoByName,
+            Map<String, String> extPlanFileKeyByName,
             Path runDir,
             Path workDir,
             String ext
     ) throws Exception {
 
-        String extFile = (ext == null) ? null : safeFileName(ext);
+        String extFile = (ext == null) ? null : resolveExtensionPlanFileKey(extPlanFileKeyByName, ext);
         String extRepoPath = (ext == null) ? null : extRepoByName.get(ext);
         if (ext != null && (extRepoPath == null || extRepoPath.isBlank())) {
             // fallback to runner.extRepoPath (single repo for all extensions)
-            extRepoPath = runnerProperties.extRepoPath();
+            extRepoPath = firstNonBlank(
+                    runStepCommandService.planValue(plan.getSettings(), "extRepoPath", "ext-repo-path"),
+                    runnerProperties.extRepoPath()
+            );
         }
         if (ext != null && (extRepoPath == null || extRepoPath.isBlank())) {
             throw new IllegalStateException("Repo path not found for extension=" + ext + " (task.repoPath empty and runner.extRepoPath not set)");
@@ -376,7 +511,7 @@ public class UpdateExecutor {
 
         // Важно: команды статичны и задаются в JSON. Здесь только подстановка токенов.
         if (sd.getRetry() != null && sd.getRetry().getCheckCommand() != null && !sd.getRetry().getCheckCommand().isEmpty()) {
-            runRetryStep(run, s, sd, needMain, mainRepoPath, extRepoPath, ext, extFile, runDir, workDir);
+            runRetryStep(run, s, plan, sd, needMain, mainRepoPath, extRepoPath, ext, extFile, runDir, workDir);
             return;
         }
 
@@ -387,6 +522,7 @@ public class UpdateExecutor {
         Map<String, String> ctx = runStepCommandService.buildContext(
                 run,
                 s,
+                plan.getSettings(),
                 needMain,
                 mainRepoPath,
                 extRepoPath,
@@ -408,6 +544,7 @@ public class UpdateExecutor {
     private void runRetryStep(
             ExecutionRun run,
             Settings s,
+            RunPlan plan,
             RunStepDef sd,
             boolean needMain,
             String mainRepoPath,
@@ -428,6 +565,7 @@ public class UpdateExecutor {
             Map<String, String> ctx = runStepCommandService.buildContext(
                     run,
                     s,
+                    plan.getSettings(),
                     needMain,
                     mainRepoPath,
                     extRepoPath,
@@ -470,6 +608,142 @@ public class UpdateExecutor {
         throw new IllegalStateException(firstNonBlank(sd.getTitle(), sd.getCode()) + " failed after " + maxAttempts + " attempts");
     }
 
+    private List<String> resolveExtensions(List<UpdateTask> extTasks) {
+        TreeSet<String> values = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        if (extTasks != null) {
+            extTasks.stream()
+                    .map(UpdateTask::getExtensionName)
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .forEach(values::add);
+        }
+        return new ArrayList<>(values);
+    }
+
+    private Map<String, String> resolveExtensionPlanFileKeys(List<UpdateTask> extTasks) {
+        Map<String, String> values = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        if (extTasks == null) {
+            return values;
+        }
+
+        for (UpdateTask task : extTasks) {
+            if (task == null || !StringUtils.hasText(task.getExtensionName())) {
+                continue;
+            }
+
+            String extensionName = task.getExtensionName().trim();
+            String explicitKey = StringUtils.hasText(task.getExtensionPlanFileKey())
+                    ? task.getExtensionPlanFileKey().trim()
+                    : null;
+            String fallbackKey = safeFileName(extensionName);
+            String current = values.get(extensionName);
+
+            if (!StringUtils.hasText(current)) {
+                values.put(extensionName, firstNonBlank(explicitKey, fallbackKey));
+                continue;
+            }
+
+            if (StringUtils.hasText(explicitKey) && current.equals(fallbackKey)) {
+                values.put(extensionName, explicitKey);
+            }
+        }
+        return values;
+    }
+
+    private String resolveExtensionPlanFileKey(Map<String, String> extPlanFileKeyByName, String ext) {
+        if (!StringUtils.hasText(ext)) {
+            return null;
+        }
+        String configured = extPlanFileKeyByName == null ? null : extPlanFileKeyByName.get(ext);
+        return firstNonBlank(configured, safeFileName(ext));
+    }
+
+    private List<UpdateTask> loadTasksForStage(RunStage stage) {
+        return switch (stage) {
+            case TEST -> updateTaskRepository.findByStatusInOrderByCreatedAtAsc(List.of(TaskStatus.NEW, TaskStatus.TEST_FAILED));
+            case PRODUCTION -> updateTaskRepository.findByStatusInOrderByCreatedAtAsc(List.of(TaskStatus.TEST_OK));
+        };
+    }
+
+    private TaskStatus successStatus(RunStage stage) {
+        return stage == RunStage.TEST ? TaskStatus.TEST_OK : TaskStatus.UPDATED;
+    }
+
+    private void afterStageSuccess(RunStage stage) {
+        if (stage == RunStage.TEST) {
+            changedObjectService.markTestingSucceeded();
+        } else {
+            changedObjectService.markProductionSucceeded();
+        }
+    }
+
+    private void afterStageFailure(RunStage stage, List<UpdateTask> tasks) {
+        if (stage != RunStage.TEST) {
+            return;
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        for (UpdateTask task : tasks) {
+            task.setStatus(TaskStatus.TEST_FAILED);
+            task.setUpdatedAt(now);
+        }
+        if (!tasks.isEmpty()) {
+            updateTaskRepository.saveAll(tasks);
+        }
+        changedObjectService.markTestingFailed();
+    }
+
+    private void verifyTestResult(
+            ExecutionRun run,
+            Settings settings,
+            RunPlan plan,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            Path runDir,
+            Path workDir
+    ) throws Exception {
+        String configured = plan.getTestResultFile();
+        if (!StringUtils.hasText(configured)) {
+            return;
+        }
+
+        String fallbackExtRepo = extRepoByName.values().stream().filter(Objects::nonNull).findFirst().orElse(null);
+        Map<String, String> ctx = runStepCommandService.buildContext(
+                run,
+                settings,
+                plan.getSettings(),
+                needMain,
+                mainRepoPath,
+                fallbackExtRepo,
+                null,
+                null,
+                null,
+                runDir,
+                workDir
+        );
+        String rendered = runStepCommandService.render(configured, ctx);
+        if (!StringUtils.hasText(rendered)) {
+            return;
+        }
+
+        Path resultFile = Path.of(rendered);
+        if (!resultFile.isAbsolute()) {
+            resultFile = workDir.resolve(rendered).normalize();
+        }
+        if (!Files.exists(resultFile)) {
+            throw new IllegalStateException("Test result file not found: " + resultFile);
+        }
+
+        String value = Files.readString(resultFile, StandardCharsets.UTF_8).trim();
+        if ("0".equals(value)) {
+            return;
+        }
+        if ("1".equals(value)) {
+            throw new IllegalStateException("Тестирование завершилось с ошибкой. result=" + value + ", file=" + resultFile);
+        }
+        throw new IllegalStateException("Некорректное значение файла результата тестирования: " + value + ", file=" + resultFile);
+    }
+
     private static String j(String s) {
         if (s == null) return "\"\"";
         String x = s.replace("\\", "\\\\")
@@ -481,6 +755,10 @@ public class UpdateExecutor {
 
     private static String norm(String s) {
         return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean isExtensionPlansStep(RunStepDef sd) {
+        return sd != null && "extensionplans".equals(norm(sd.getSpecial()));
     }
 
     private static String firstNonBlank(String a, String b) {

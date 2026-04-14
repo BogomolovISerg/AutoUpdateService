@@ -48,6 +48,7 @@ public class DependencyTreeBuildService {
     private final OneCNameDecoder oneCNameDecoder;
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final DependencyScanLogRepository dependencyScanLogRepository;
+    private final ChangedObjectService changedObjectService;
 
     public DependencySnapshot fullRebuild() {
         CodeSourceRoot sourceRoot = codeSourceRootRepository
@@ -82,7 +83,10 @@ public class DependencyTreeBuildService {
             snapshot.setNotes(buildFinishNotes(artifacts));
             snapshot = dependencySnapshotRepository.save(snapshot);
 
+            List<DependencyGraphDirtyItem> dirtyItems = dependencyGraphStateService.pendingDirtyItems();
+            changedObjectService.registerObjectsFromDirtyModules(snapshot, dirtyItems, null);
             dependencyGraphStateService.markSnapshotReady(snapshot);
+            dependencyGraphStateService.markDirtyItemsProcessed(dirtyItems);
             saveScanLog(snapshot, "INFO", "FINISH", baseSourceRoot.getRootPath(),
                     "Полное сканирование завершено. Обработано=" + artifacts.filesScanned()
                             + ", пропущено=" + artifacts.skippedFiles()

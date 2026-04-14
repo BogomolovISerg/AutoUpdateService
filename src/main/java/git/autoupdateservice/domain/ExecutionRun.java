@@ -18,6 +18,10 @@ public class ExecutionRun {
     @Column(name = "planned_for", nullable = false)
     private OffsetDateTime plannedFor;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stage", nullable = false, length = 20)
+    private RunStage stage = RunStage.PRODUCTION;
+
     @Column(name = "started_at")
     private OffsetDateTime startedAt;
 
