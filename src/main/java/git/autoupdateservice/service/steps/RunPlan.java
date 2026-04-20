@@ -23,8 +23,17 @@ public class RunPlan {
     @JsonAlias({"xunitConfigFile", "smokeConfigFile"})
     private String xunitConfigFile;
 
+    @JsonAlias({"objectListFile", "testObjectsFile", "testObjectListFile", "smokeObjectListFile"})
+    private String objectListFile;
+
     @JsonAlias({"extensionPlanMask", "extensionPlanPattern", "extPlanFilePattern", "extensionsPlanFilePattern"})
     private String extensionPlanFilePattern;
+
+    @JsonAlias({"extensionName"})
+    private String ext;
+
+    @JsonAlias({"extensionPlanFileKey", "extensionFileKey", "ext-file"})
+    private String extFile;
 
     @JsonAlias({"plan"})
     private List<RunStepDef> steps = new ArrayList<>();

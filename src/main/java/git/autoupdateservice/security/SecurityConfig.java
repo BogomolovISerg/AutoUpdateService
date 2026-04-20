@@ -26,19 +26,21 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login", "/app.css").permitAll()
+                        .requestMatchers("/login", "/error", "/app.css").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/gitlab/webhook").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/test-objects/connection").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/test-objects").permitAll()
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
                         .loginPage("/login")
-                        .defaultSuccessUrl("/", true)
+                        .defaultSuccessUrl("/", false)
                         .permitAll()
                 )
                 .logout(Customizer.withDefaults());
 
-        // CSRF: отключаем только для webhook
-        http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/gitlab/webhook"));
+        // CSRF: отключаем только для внешних API. Доступ к ним дополнительно защищается токеном.
+        http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/gitlab/webhook", "/api/test-objects"));
 
         // принудительная смена пароля после логина
         http.addFilterAfter(mustChangePasswordFilter, UsernamePasswordAuthenticationFilter.class);

@@ -100,7 +100,7 @@ public class DependencyGraphChangeDetector {
             String[] parts = decodedPath.split("/");
             int commonModulesIndex = -1;
             for (int i = 0; i < parts.length; i++) {
-                if ("commonmodules".equals(parts[i].toLowerCase(Locale.ROOT))) {
+                if (isCommonModulesRoot(parts[i])) {
                     commonModulesIndex = i;
                     break;
                 }
@@ -121,7 +121,7 @@ public class DependencyGraphChangeDetector {
         return hits;
     }
 
-    private List<DirectObjectHit> extractDirectObjects(List<GitlabChangesService.ChangedFile> files) {
+    public List<DirectObjectHit> extractDirectObjects(List<GitlabChangesService.ChangedFile> files) {
         Set<String> dedup = new LinkedHashSet<>();
         java.util.ArrayList<DirectObjectHit> hits = new java.util.ArrayList<>();
         if (files == null) {
@@ -183,15 +183,33 @@ public class DependencyGraphChangeDetector {
         if (rawRoot == null || rawRoot.isBlank()) {
             return null;
         }
-        String normalized = rawRoot.trim().toLowerCase(Locale.ROOT);
+        String normalized = normalizeRootName(rawRoot);
         return switch (normalized) {
-            case "catalogs" -> DependencyCallerType.CATALOG;
-            case "documents" -> DependencyCallerType.DOCUMENT;
-            case "reports" -> DependencyCallerType.REPORT;
-            case "commonforms" -> DependencyCallerType.COMMON_FORM;
-            case "dataprocessors" -> DependencyCallerType.DATA_PROCESSOR;
+            case "catalogs", "catalog", "справочники", "справочник" -> DependencyCallerType.CATALOG;
+            case "documents", "document", "документы", "документ" -> DependencyCallerType.DOCUMENT;
+            case "reports", "report", "отчеты", "отчет" -> DependencyCallerType.REPORT;
+            case "commonforms", "commonform", "общиеформы", "общаяформа" -> DependencyCallerType.COMMON_FORM;
+            case "dataprocessors", "dataprocessor", "обработки", "обработка" -> DependencyCallerType.DATA_PROCESSOR;
             default -> null;
         };
+    }
+
+    private boolean isCommonModulesRoot(String rawRoot) {
+        String normalized = normalizeRootName(rawRoot);
+        return "commonmodules".equals(normalized)
+                || "commonmodule".equals(normalized)
+                || "общиемодули".equals(normalized)
+                || "общиймодуль".equals(normalized);
+    }
+
+    private String normalizeRootName(String rawRoot) {
+        if (rawRoot == null) {
+            return "";
+        }
+        return rawRoot.trim()
+                .toLowerCase(Locale.ROOT)
+                .replace('ё', 'е')
+                .replaceAll("[\\s_\\-]+", "");
     }
 
     private LocalDate resolveBusinessDate(OffsetDateTime changeAt) {

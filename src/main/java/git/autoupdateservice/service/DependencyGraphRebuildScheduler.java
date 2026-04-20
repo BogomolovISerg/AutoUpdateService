@@ -1,9 +1,7 @@
 package git.autoupdateservice.service;
 
 import git.autoupdateservice.domain.DependencyGraphState;
-import git.autoupdateservice.domain.DependencySnapshotStatus;
 import git.autoupdateservice.domain.LogType;
-import git.autoupdateservice.repo.DependencySnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,8 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DependencyGraphRebuildScheduler {
 
     private final DependencyGraphStateService dependencyGraphStateService;
-    private final DependencyTreeBuildService dependencyTreeBuildService;
-    private final DependencySnapshotRepository dependencySnapshotRepository;
+    private final DependencyGraphRebuildCoordinator dependencyGraphRebuildCoordinator;
     private final AuditLogService auditLogService;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -33,13 +30,9 @@ public class DependencyGraphRebuildScheduler {
                 return;
             }
 
-            if (dependencySnapshotRepository.existsByStatus(DependencySnapshotStatus.BUILDING)) {
-                return;
-            }
-
             auditLogService.info(
                     LogType.WEBHOOK_RECEIVED,
-                    "Dependency graph rebuild started automatically",
+                    "Dependency graph rebuild requested automatically",
                     "{\"staleSince\":" + json(state.getStaleSince() == null ? "" : String.valueOf(state.getStaleSince()))
                             + ",\"staleReason\":" + json(state.getStaleReason() == null ? "" : state.getStaleReason()) + "}",
                     null,
@@ -47,7 +40,7 @@ public class DependencyGraphRebuildScheduler {
                     null
             );
 
-            dependencyTreeBuildService.fullRebuild();
+            dependencyGraphRebuildCoordinator.startIfStaleAsync("scheduled rebuild", null);
         } catch (Exception e) {
             auditLogService.warn(
                     LogType.WEBHOOK_RECEIVED,

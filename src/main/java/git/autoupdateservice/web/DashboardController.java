@@ -28,10 +28,7 @@ public class DashboardController {
     @GetMapping("/")
     public String dashboard(Model model, Authentication auth) {
         var settings = settingsService.get();
-        var recentRuns = executionRunRepository.findAll().stream()
-                .sorted((a, b) -> b.getPlannedFor().compareTo(a.getPlannedFor()))
-                .limit(20)
-                .toList();
+        var recentRuns = executionRunRepository.findTop20ByOrderByStartedAtDesc();
 
         ZoneId zone;
         try {

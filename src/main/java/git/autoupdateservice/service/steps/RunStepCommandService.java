@@ -87,11 +87,14 @@ public class RunStepCommandService {
         context.put("ib-connectionrepo", nvl(ibConnectionRepo));
         context.put("ib-connection-repo", nvl(ibConnectionRepo));
 
+        String resolvedExt = firstNonBlank(ext, resolveSetting(planSettings, null, "ext"));
+        String resolvedExtFile = firstNonBlank(extFile, resolveSetting(planSettings, resolvedExt, "extFile", "ext-file"));
+
         context.put("needMain", String.valueOf(needMain));
         context.put("mainRepoPath", nvl(firstNonBlank(mainRepoPath, resolveSetting(planSettings, runnerProperties.mainRepoPath(), "mainRepoPath", "main-repo-path"))));
         context.put("extRepoPath", nvl(firstNonBlank(extRepoPath, resolveSetting(planSettings, runnerProperties.extRepoPath(), "extRepoPath", "ext-repo-path"))));
-        context.put("ext", nvl(ext));
-        context.put("extFile", nvl(extFile));
+        context.put("ext", nvl(resolvedExt));
+        context.put("extFile", nvl(resolvedExtFile));
         context.put("attempt", attempt == null ? "" : String.valueOf(attempt));
         context.put("runId", String.valueOf(run.getId()));
         context.put("runDir", runDir.toAbsolutePath().toString());

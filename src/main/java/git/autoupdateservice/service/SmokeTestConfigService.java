@@ -5,8 +5,6 @@ import git.autoupdateservice.domain.ChangedObject;
 import git.autoupdateservice.domain.DependencyCallerType;
 import git.autoupdateservice.domain.ExecutionRun;
 import git.autoupdateservice.domain.LogType;
-import git.autoupdateservice.domain.SourceKind;
-import git.autoupdateservice.repo.CodeSourceRootRepository;
 import git.autoupdateservice.service.steps.RunPlan;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,7 +19,6 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -34,15 +31,20 @@ public class SmokeTestConfigService {
     private static final String DEFAULT_LOG_FILE = "$workspaceRoot/log-xunit.txt";
 
     private final ChangedObjectService changedObjectService;
-    private final CodeSourceRootRepository codeSourceRootRepository;
-    private final DependencySourceRootService dependencySourceRootService;
+    private final SmokeObjectListService smokeObjectListService;
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
 
+    public Path prepareOutputFile(RunPlan plan, Path workDir) {
+        Path outputFile = resolveOutputFile(plan, workDir);
+        publishOutputFileTokens(plan, outputFile);
+        return outputFile;
+    }
+
     @Transactional(readOnly = true)
     public Path generateForTesting(RunPlan plan, ExecutionRun run, Path workDir) throws IOException {
-        Path outputFile = resolveOutputFile(plan, workDir);
-        Map<DependencyCallerType, Set<String>> allObjects = collectAllObjects();
+        Path outputFile = prepareOutputFile(plan, workDir);
+        Map<DependencyCallerType, Set<String>> allObjects = smokeObjectListService.loadLatestObjects(plan);
         Map<DependencyCallerType, Set<String>> changedObjects = collectChangedObjects(changedObjectService.findForTesting());
 
         Map<String, Object> root = new LinkedHashMap<>();
@@ -158,30 +160,6 @@ public class SmokeTestConfigService {
         return new ArrayList<>(values);
     }
 
-    private Map<DependencyCallerType, Set<String>> collectAllObjects() throws IOException {
-        var baseRoot = codeSourceRootRepository.findFirstBySourceKindAndEnabledIsTrue(SourceKind.BASE)
-                .orElseThrow(() -> new IllegalStateException("Не настроен активный источник основной конфигурации"));
-        List<DependencySourceRootService.ScanRoot> scanRoots = dependencySourceRootService.collectScanRoots(baseRoot);
-        var discovered = dependencySourceRootService.discoverBslFiles(scanRoots);
-
-        Map<DependencyCallerType, Set<String>> result = new LinkedHashMap<>();
-        for (Map.Entry<DependencySourceRootService.ScanRoot, List<Path>> entry : discovered.objectFilesByRoot().entrySet()) {
-            DependencySourceRootService.ScanRoot root = entry.getKey();
-            for (Path file : entry.getValue()) {
-                DependencySourceRootService.ObjectRef ref = dependencySourceRootService.determineObjectRef(root.path(), file);
-                if (ref == null || ref.objectType() == null || !StringUtils.hasText(ref.objectName())) {
-                    continue;
-                }
-                if (!isSupportedType(ref.objectType())) {
-                    continue;
-                }
-                result.computeIfAbsent(ref.objectType(), key -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER))
-                        .add(ref.objectName().trim());
-            }
-        }
-        return result;
-    }
-
     private Map<DependencyCallerType, Set<String>> collectChangedObjects(Collection<ChangedObject> rows) {
         Map<DependencyCallerType, Set<String>> result = new LinkedHashMap<>();
         if (rows == null) {
@@ -218,6 +196,17 @@ public class SmokeTestConfigService {
             path = workDir.resolve(configured);
         }
         return path.toAbsolutePath().normalize();
+    }
+
+    private void publishOutputFileTokens(RunPlan plan, Path outputFile) {
+        if (plan == null || plan.getSettings() == null || outputFile == null) {
+            return;
+        }
+        String value = outputFile.toString();
+        plan.getSettings().put("xunitConfigFile", value);
+        plan.getSettings().put("xunit-config-file", value);
+        plan.getSettings().put("smokeConfigFile", value);
+        plan.getSettings().put("smoke-config-file", value);
     }
 
     private boolean isSupportedType(DependencyCallerType type) {

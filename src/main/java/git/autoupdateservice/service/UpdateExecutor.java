@@ -12,6 +12,7 @@ import git.autoupdateservice.service.steps.RunStepExecutor;
 import git.autoupdateservice.service.steps.StepPlanLoader;
 import git.autoupdateservice.util.PasswordMasker;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,6 +20,7 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.*;
 
@@ -37,8 +39,13 @@ public class UpdateExecutor {
     private final JdbcTemplate jdbcTemplate;
     private final RunnerLogsCleanupService runnerLogsCleanupService;
     private final DependencyGraphStateService dependencyGraphStateService;
+    private final DependencyGraphRebuildCoordinator dependencyGraphRebuildCoordinator;
     private final ChangedObjectService changedObjectService;
     private final SmokeTestConfigService smokeTestConfigService;
+    private final TaskChangedFileService taskChangedFileService;
+
+    @Value("${app.dependency-graph.test-wait-minutes:60}")
+    private long dependencyGraphTestWaitMinutes;
 
     private boolean tryAcquireRunLock() {
         Boolean ok = jdbcTemplate.queryForObject("select pg_try_advisory_lock(987654321)", Boolean.class);
@@ -55,7 +62,19 @@ public class UpdateExecutor {
 
         try {
 
-            if (executionRunRepository.findByPlannedForAndStage(plannedFor, stage).isPresent()) return Optional.empty();
+            Optional<ExecutionRun> existingRun = executionRunRepository.findTopByPlannedForAndStageOrderByStartedAtDesc(plannedFor, stage);
+            if (existingRun.isPresent()) {
+                ExecutionRun existing = existingRun.get();
+                if (existing.getStatus() == RunStatus.SUCCESS) {
+                    return existingRun;
+                }
+                if (existing.getStatus() == RunStatus.RUNNING) {
+                    existing.setStatus(RunStatus.FAILED);
+                    existing.setFinishedAt(OffsetDateTime.now());
+                    existing.setErrorSummary("Previous run was marked as RUNNING, but no active advisory lock exists. Marked as failed before retry.");
+                    executionRunRepository.save(existing);
+                }
+            }
 
             DependencyGraphState graphState = dependencyGraphStateService.getState();
             DependencySnapshot activeSnapshot = graphState.getActiveSnapshot();
@@ -104,6 +123,8 @@ public class UpdateExecutor {
                 );
             }
 
+            List<UpdateTask> tasks = List.of();
+
             try {
                 runnerLogsCleanupService.cleanupOldRuns();
 
@@ -127,16 +148,89 @@ public class UpdateExecutor {
             }
 
 
+            if (stage == RunStage.TEST && graphState.isGraphIsStale()) {
+                long waitMinutes = Math.max(0L, dependencyGraphTestWaitMinutes);
+                auditLogService.info(
+                        LogType.RUN_STARTED,
+                        "Dependency graph is stale. Rebuild will be started or awaited before TEST run.",
+                        "{\"runId\":" + j(String.valueOf(run.getId()))
+                                + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
+                                + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason())
+                                + ",\"waitMinutes\":" + waitMinutes + "}",
+                        null,
+                        "system",
+                        run.getId()
+                );
+
+                DependencyGraphRebuildCoordinator.WaitResult waitResult =
+                        dependencyGraphRebuildCoordinator.startIfStaleAndWait(
+                                "TEST run " + run.getId(),
+                                run.getId(),
+                                Duration.ofMinutes(waitMinutes)
+                        );
+
+                graphState = dependencyGraphStateService.getState();
+                activeSnapshot = graphState.getActiveSnapshot();
+                if (waitResult.ready()) {
+                    run.setDependencySnapshot(activeSnapshot);
+                    executionRunRepository.save(run);
+
+                    auditLogService.info(
+                            LogType.RUN_STARTED,
+                            "Dependency graph rebuild completed before TEST run.",
+                            "{\"runId\":" + j(String.valueOf(run.getId()))
+                                    + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
+                                    + ",\"started\":" + waitResult.started()
+                                    + ",\"alreadyRunning\":" + waitResult.alreadyRunning() + "}",
+                            null,
+                            "system",
+                            run.getId()
+                    );
+                } else if (waitResult.timedOut()) {
+                    DependencySnapshot staleSnapshot = waitResult.activeSnapshot() == null ? activeSnapshot : waitResult.activeSnapshot();
+                    if (staleSnapshot != null) {
+                        changedObjectService.registerObjectsFromDirtyModules(
+                                staleSnapshot,
+                                dependencyGraphStateService.pendingDirtyItems(),
+                                null
+                        );
+                        run.setDependencySnapshot(staleSnapshot);
+                        executionRunRepository.save(run);
+                    }
+
+                    auditLogService.warn(
+                            LogType.RUN_STARTED,
+                            "Dependency graph rebuild wait timeout. Test object list will be built from stale graph snapshot.",
+                            "{\"runId\":" + j(String.valueOf(run.getId()))
+                                    + ",\"waitMinutes\":" + waitMinutes
+                                    + ",\"dependencySnapshotId\":" + j(staleSnapshot == null ? "" : String.valueOf(staleSnapshot.getId()))
+                                    + ",\"started\":" + waitResult.started()
+                                    + ",\"alreadyRunning\":" + waitResult.alreadyRunning()
+                                    + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
+                                    + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason()) + "}",
+                            null,
+                            "system",
+                            run.getId()
+                    );
+                } else {
+                    throw new IllegalStateException("Dependency graph rebuild failed before TEST run: " + waitResult.status());
+                }
+            }
+
             Settings s = settingsRepository.findById(1L).orElseThrow();
             RunPlan plan = stepPlanLoader.loadPlan(stage);
 
-            List<UpdateTask> tasks = loadTasksForStage(stage);
+            tasks = loadTasksForStage(stage);
             if (tasks.isEmpty()) {
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
                 executionRunRepository.save(run);
                 auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{\"stage\":" + j(stage.name()) + "}", null, "system", run.getId());
                 return Optional.of(run);
+            }
+
+            if (stage == RunStage.TEST) {
+                taskChangedFileService.registerDirectObjectsFromStoredChanges(tasks, run.getId());
             }
 
             boolean needMain = tasks.stream().anyMatch(t -> t.getTargetType() == TargetType.MAIN);
@@ -181,11 +275,7 @@ public class UpdateExecutor {
 
             try {
                 if (stage == RunStage.TEST) {
-                    Path smokeConfigFile = smokeTestConfigService.generateForTesting(plan, run, workDir);
-                    plan.getSettings().put("xunitConfigFile", smokeConfigFile.toString());
-                    plan.getSettings().put("xunit-config-file", smokeConfigFile.toString());
-                    plan.getSettings().put("smokeConfigFile", smokeConfigFile.toString());
-                    plan.getSettings().put("smoke-config-file", smokeConfigFile.toString());
+                    smokeTestConfigService.prepareOutputFile(plan, workDir);
                     String testResultFile = plan.getTestResultFile();
                     if (StringUtils.hasText(testResultFile)) {
                         plan.getSettings().put("testResultFile", testResultFile);
@@ -349,24 +439,60 @@ public class UpdateExecutor {
             Path runDir,
             Path workDir
     ) throws Exception {
-        for (String ext : extensions) {
-            String extFile = resolveExtensionPlanFileKey(extPlanFileKeyByName, ext);
-            RunPlan extPlan = stepPlanLoader.loadExtensionPlan(basePlan, ext, extFile)
-                    .orElseThrow(() -> new IllegalStateException("Extension plan pattern is not configured for extension=" + ext));
-            Map<String, String> singleExtFileKey = Map.of(ext, extFile);
+        if (extensions != null && !extensions.isEmpty()) {
+            for (String ext : extensions) {
+                String extFile = resolveExtensionPlanFileKey(extPlanFileKeyByName, ext);
+                RunPlan extPlan = stepPlanLoader.loadExtensionPlan(basePlan, ext, extFile)
+                        .orElseThrow(() -> new IllegalStateException("Extension plan pattern is not configured for extension=" + ext));
+                executeSingleExtensionPlan(run, s, extPlan, ext, extFile, needMain, mainRepoPath, extRepoByName, runDir, workDir);
+            }
+            return;
+        }
 
-            List<RunStepDef> orderedSteps = collectOrderedSteps(extPlan);
-            List<RunStepDef> alwaysSteps = collectAlwaysSteps(extPlan);
-            Set<RunStepDef> executedAlwaysSteps = new LinkedHashSet<>();
+        List<StepPlanLoader.ExtensionPlanSpec> discoveredPlans = stepPlanLoader.loadDiscoveredExtensionPlans(basePlan);
+        if (discoveredPlans.isEmpty()) {
+            throw new IllegalStateException("Extension plans not found by pattern: " + basePlan.getExtensionPlanFilePattern());
+        }
+        for (StepPlanLoader.ExtensionPlanSpec discovered : discoveredPlans) {
+            executeSingleExtensionPlan(
+                    run,
+                    s,
+                    discovered.plan(),
+                    discovered.extensionName(),
+                    discovered.extFile(),
+                    needMain,
+                    mainRepoPath,
+                    extRepoByName,
+                    runDir,
+                    workDir
+            );
+        }
+    }
 
-            try {
-                executePlanSteps(run, s, extPlan, orderedSteps, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir, false, executedAlwaysSteps);
-                verifyTestResult(run, s, extPlan, needMain, mainRepoPath, extRepoByName, runDir, workDir);
-            } finally {
-                for (RunStepDef sd : alwaysSteps) {
-                    if (!executedAlwaysSteps.contains(sd)) {
-                        tryExecutePlannedStepIgnore(run, s, extPlan, sd, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir);
-                    }
+    private void executeSingleExtensionPlan(
+            ExecutionRun run,
+            Settings s,
+            RunPlan extPlan,
+            String ext,
+            String extFile,
+            boolean needMain,
+            String mainRepoPath,
+            Map<String, String> extRepoByName,
+            Path runDir,
+            Path workDir
+    ) throws Exception {
+        Map<String, String> singleExtFileKey = Map.of(ext, extFile);
+        List<RunStepDef> orderedSteps = collectOrderedSteps(extPlan);
+        List<RunStepDef> alwaysSteps = collectAlwaysSteps(extPlan);
+        Set<RunStepDef> executedAlwaysSteps = new LinkedHashSet<>();
+
+        try {
+            executePlanSteps(run, s, extPlan, orderedSteps, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir, false, executedAlwaysSteps);
+            verifyTestResult(run, s, extPlan, needMain, mainRepoPath, extRepoByName, runDir, workDir);
+        } finally {
+            for (RunStepDef sd : alwaysSteps) {
+                if (!executedAlwaysSteps.contains(sd)) {
+                    tryExecutePlannedStepIgnore(run, s, extPlan, sd, needMain, mainRepoPath, extRepoByName, singleExtFileKey, List.of(ext), runDir, workDir);
                 }
             }
         }
@@ -408,13 +534,15 @@ public class UpdateExecutor {
             if (!allowSpecialExtensionPlans) {
                 throw new IllegalStateException("Special step extensionPlans is not supported inside extension plan");
             }
-            if (!extensions.isEmpty()) {
-                executeExtensionPlans(run, s, plan, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
-            }
+            executeExtensionPlans(run, s, plan, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
             if (sd.isAlways()) {
                 executedAlwaysSteps.add(sd);
             }
             return;
+        }
+
+        if (run.getStage() == RunStage.TEST && shouldGenerateSmokeConfig(sd)) {
+            smokeTestConfigService.generateForTesting(plan, run, workDir);
         }
 
         executePlannedStep(run, s, plan, sd, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
@@ -759,6 +887,32 @@ public class UpdateExecutor {
 
     private static boolean isExtensionPlansStep(RunStepDef sd) {
         return sd != null && "extensionplans".equals(norm(sd.getSpecial()));
+    }
+
+    private static boolean shouldGenerateSmokeConfig(RunStepDef sd) {
+        if (sd == null) {
+            return false;
+        }
+        String code = norm(sd.getCode());
+        if ("smoke_tests".equals(code) || "smoketests".equals(code)) {
+            return true;
+        }
+        return containsSmokeConfigToken(sd.getCommand())
+                || (sd.getRetry() != null
+                && (containsSmokeConfigToken(sd.getRetry().getCheckCommand())
+                || containsSmokeConfigToken(sd.getRetry().getOnFailCommand())));
+    }
+
+    private static boolean containsSmokeConfigToken(List<String> command) {
+        if (command == null || command.isEmpty()) {
+            return false;
+        }
+        for (String arg : command) {
+            if (arg != null && (arg.contains("{{xunitConfigFile}}") || arg.contains("{{smokeConfigFile}}"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String firstNonBlank(String a, String b) {

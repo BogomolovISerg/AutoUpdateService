@@ -88,13 +88,14 @@ public class QueueService {
             return Optional.of(saved);
         } catch (DataIntegrityViolationException e) {
             // чаще всего: duplicate source_key
+            Optional<UpdateTask> existing = updateTaskRepository.findBySourceKey(event.sourceKey());
             auditLogService.warn(
                     LogType.TASK_ENQUEUED, // если хотите — заведите отдельный LogType, например TASK_DUPLICATE_IGNORED
-                    "Task not inserted (duplicate/constraint): " + safeMsg(e),
-                    "{\"sourceKey\":\"" + esc(event.sourceKey()) + "\",\"projectPath\":\"" + esc(event.projectPath()) + "\",\"commitSha\":\"" + esc(event.commitSha()) + "\"}",
+                    "Task not inserted (duplicate/constraint), existing task will be reused: " + safeMsg(e),
+                    "{\"sourceKey\":\"" + esc(event.sourceKey()) + "\",\"projectPath\":\"" + esc(event.projectPath()) + "\",\"commitSha\":\"" + esc(event.commitSha()) + "\",\"existingTaskId\":\"" + existing.map(x -> String.valueOf(x.getId())).orElse("") + "\"}",
                     clientIp, "gitlab", null
             );
-            return Optional.empty();
+            return existing;
         }
     }
 

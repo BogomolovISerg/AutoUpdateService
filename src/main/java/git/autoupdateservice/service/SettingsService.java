@@ -20,7 +20,12 @@ public class SettingsService {
     private final AuditLogService auditLogService;
 
     public Settings get() {
-        return settingsRepository.findById(1L).orElseThrow();
+        return settingsRepository.findById(1L).orElseGet(() -> {
+            Settings settings = new Settings();
+            settings.setId(1L);
+            settings.setUpdatedAt(OffsetDateTime.now());
+            return settingsRepository.save(settings);
+        });
     }
 
     /**
@@ -57,7 +62,7 @@ public class SettingsService {
 
     @Transactional
     public Settings update(Settings patch, String clientIp, String actor) {
-        Settings s = settingsRepository.findById(1L).orElseThrow();
+        Settings s = get();
 
         s.setAutoUpdateEnabled(patch.isAutoUpdateEnabled());
         s.setTestRunTime(patch.getTestRunTime());
@@ -84,7 +89,7 @@ public class SettingsService {
 
     @Transactional
     public void setAutoUpdateEnabled(boolean enabled, boolean cancelPending, String clientIp, String actor) {
-        Settings s = settingsRepository.findById(1L).orElseThrow();
+        Settings s = get();
         boolean before = s.isAutoUpdateEnabled();
 
         s.setAutoUpdateEnabled(enabled);

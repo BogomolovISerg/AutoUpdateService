@@ -5,7 +5,7 @@ import git.autoupdateservice.domain.DependencyCallerType;
 import git.autoupdateservice.domain.SourceKind;
 import git.autoupdateservice.repo.CodeSourceRootRepository;
 import git.autoupdateservice.service.DependenciesPageService;
-import git.autoupdateservice.service.DependencyTreeBuildService;
+import git.autoupdateservice.service.DependencyGraphRebuildCoordinator;
 import git.autoupdateservice.service.DependencyTreeSearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
@@ -25,7 +25,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DependenciesController {
 
-    private final DependencyTreeBuildService dependencyTreeBuildService;
+    private final DependencyGraphRebuildCoordinator dependencyGraphRebuildCoordinator;
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final CodeSourceRootRepository codeSourceRootRepository;
     private final DependenciesPageService dependenciesPageService;
@@ -44,7 +44,7 @@ public class DependenciesController {
     @PostMapping("/dependencies/rebuild")
     public String rebuild(RedirectAttributes ra) {
         try {
-            var snapshot = dependencyTreeBuildService.fullRebuild();
+            var snapshot = dependencyGraphRebuildCoordinator.rebuildNowIfIdle(null);
             ra.addFlashAttribute("message", "Сканирование завершено. Статус: " + snapshot.getStatus());
         } catch (Exception e) {
             ra.addFlashAttribute("error", e.getMessage());

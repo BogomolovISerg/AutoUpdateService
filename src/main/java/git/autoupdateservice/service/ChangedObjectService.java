@@ -23,13 +23,13 @@ public class ChangedObjectService {
     private final AuditLogService auditLogService;
 
     @Transactional
-    public void registerDirectObjects(
+    public int registerDirectObjects(
             UpdateTask task,
             Collection<DependencyGraphChangeDetector.DirectObjectHit> hits,
             String clientIp
     ) {
         if (task == null || task.getScheduledFor() == null || hits == null || hits.isEmpty()) {
-            return;
+            return 0;
         }
 
         int affected = 0;
@@ -68,6 +68,7 @@ public class ChangedObjectService {
                     null
             );
         }
+        return affected;
     }
 
     @Transactional
