@@ -18,6 +18,9 @@ public class Settings {
     @Column(name = "auto_update_enabled", nullable = false)
     private boolean autoUpdateEnabled = true;
 
+    @Column(name = "dependency_graph_rebuild_enabled", nullable = false)
+    private boolean dependencyGraphRebuildEnabled = true;
+
     @Column(name = "test_run_time", nullable = false)
     private LocalTime testRunTime = LocalTime.of(2, 0);
 

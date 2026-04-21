@@ -149,63 +149,24 @@ public class UpdateExecutor {
 
 
             if (stage == RunStage.TEST && graphState.isGraphIsStale()) {
-                long waitMinutes = Math.max(0L, dependencyGraphTestWaitMinutes);
-                auditLogService.info(
-                        LogType.RUN_STARTED,
-                        "Dependency graph is stale. Rebuild will be started or awaited before TEST run.",
-                        "{\"runId\":" + j(String.valueOf(run.getId()))
-                                + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
-                                + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason())
-                                + ",\"waitMinutes\":" + waitMinutes + "}",
-                        null,
-                        "system",
-                        run.getId()
-                );
+                Settings rebuildSettings = settingsRepository.findById(1L).orElseThrow();
 
-                DependencyGraphRebuildCoordinator.WaitResult waitResult =
-                        dependencyGraphRebuildCoordinator.startIfStaleAndWait(
-                                "TEST run " + run.getId(),
-                                run.getId(),
-                                Duration.ofMinutes(waitMinutes)
-                        );
-
-                graphState = dependencyGraphStateService.getState();
-                activeSnapshot = graphState.getActiveSnapshot();
-                if (waitResult.ready()) {
-                    run.setDependencySnapshot(activeSnapshot);
-                    executionRunRepository.save(run);
-
-                    auditLogService.info(
-                            LogType.RUN_STARTED,
-                            "Dependency graph rebuild completed before TEST run.",
-                            "{\"runId\":" + j(String.valueOf(run.getId()))
-                                    + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
-                                    + ",\"started\":" + waitResult.started()
-                                    + ",\"alreadyRunning\":" + waitResult.alreadyRunning() + "}",
-                            null,
-                            "system",
-                            run.getId()
-                    );
-                } else if (waitResult.timedOut()) {
-                    DependencySnapshot staleSnapshot = waitResult.activeSnapshot() == null ? activeSnapshot : waitResult.activeSnapshot();
-                    if (staleSnapshot != null) {
+                if (!rebuildSettings.isDependencyGraphRebuildEnabled()) {
+                    if (activeSnapshot != null) {
                         changedObjectService.registerObjectsFromDirtyModules(
-                                staleSnapshot,
+                                activeSnapshot,
                                 dependencyGraphStateService.pendingDirtyItems(),
                                 null
                         );
-                        run.setDependencySnapshot(staleSnapshot);
+                        run.setDependencySnapshot(activeSnapshot);
                         executionRunRepository.save(run);
                     }
 
                     auditLogService.warn(
                             LogType.RUN_STARTED,
-                            "Dependency graph rebuild wait timeout. Test object list will be built from stale graph snapshot.",
+                            "Dependency graph rebuild is disabled by settings. Test object list will be built from stale graph snapshot.",
                             "{\"runId\":" + j(String.valueOf(run.getId()))
-                                    + ",\"waitMinutes\":" + waitMinutes
-                                    + ",\"dependencySnapshotId\":" + j(staleSnapshot == null ? "" : String.valueOf(staleSnapshot.getId()))
-                                    + ",\"started\":" + waitResult.started()
-                                    + ",\"alreadyRunning\":" + waitResult.alreadyRunning()
+                                    + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
                                     + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
                                     + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason()) + "}",
                             null,
@@ -213,7 +174,77 @@ public class UpdateExecutor {
                             run.getId()
                     );
                 } else {
-                    throw new IllegalStateException("Dependency graph rebuild failed before TEST run: " + waitResult.status());
+                    long waitMinutes = Math.max(0L, dependencyGraphTestWaitMinutes);
+
+                    auditLogService.info(
+                            LogType.RUN_STARTED,
+                            "Dependency graph is stale. Rebuild will be started or awaited before TEST run.",
+                            "{\"runId\":" + j(String.valueOf(run.getId()))
+                                    + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
+                                    + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason())
+                                    + ",\"waitMinutes\":" + waitMinutes + "}",
+                            null,
+                            "system",
+                            run.getId()
+                    );
+
+                    DependencyGraphRebuildCoordinator.WaitResult waitResult =
+                            dependencyGraphRebuildCoordinator.startIfStaleAndWait(
+                                    "TEST run " + run.getId(),
+                                    run.getId(),
+                                    Duration.ofMinutes(waitMinutes)
+                            );
+
+                    graphState = dependencyGraphStateService.getState();
+                    activeSnapshot = graphState.getActiveSnapshot();
+
+                    if (waitResult.ready()) {
+                        run.setDependencySnapshot(activeSnapshot);
+                        executionRunRepository.save(run);
+
+                        auditLogService.info(
+                                LogType.RUN_STARTED,
+                                "Dependency graph rebuild completed before TEST run.",
+                                "{\"runId\":" + j(String.valueOf(run.getId()))
+                                        + ",\"dependencySnapshotId\":" + j(activeSnapshot == null ? "" : String.valueOf(activeSnapshot.getId()))
+                                        + ",\"started\":" + waitResult.started()
+                                        + ",\"alreadyRunning\":" + waitResult.alreadyRunning() + "}",
+                                null,
+                                "system",
+                                run.getId()
+                        );
+                    } else if (waitResult.timedOut()) {
+                        DependencySnapshot staleSnapshot =
+                                waitResult.activeSnapshot() == null ? activeSnapshot : waitResult.activeSnapshot();
+                        if (staleSnapshot != null) {
+                            changedObjectService.registerObjectsFromDirtyModules(
+                                    staleSnapshot,
+                                    dependencyGraphStateService.pendingDirtyItems(),
+                                    null
+                            );
+                            run.setDependencySnapshot(staleSnapshot);
+                            executionRunRepository.save(run);
+                        }
+
+                        auditLogService.warn(
+                                LogType.RUN_STARTED,
+                                "Dependency graph rebuild wait timeout. Test object list will be built from stale graph snapshot.",
+                                "{\"runId\":" + j(String.valueOf(run.getId()))
+                                        + ",\"waitMinutes\":" + waitMinutes
+                                        + ",\"dependencySnapshotId\":" + j(staleSnapshot == null ? "" : String.valueOf(staleSnapshot.getId()))
+                                        + ",\"started\":" + waitResult.started()
+                                        + ",\"alreadyRunning\":" + waitResult.alreadyRunning()
+                                        + ",\"staleSince\":" + j(graphState.getStaleSince() == null ? "" : String.valueOf(graphState.getStaleSince()))
+                                        + ",\"staleReason\":" + j(graphState.getStaleReason() == null ? "" : graphState.getStaleReason()) + "}",
+                                null,
+                                "system",
+                                run.getId()
+                        );
+                    } else {
+                        throw new IllegalStateException(
+                                "Dependency graph rebuild failed before TEST run: " + waitResult.status()
+                        );
+                    }
                 }
             }
 
@@ -286,6 +317,9 @@ public class UpdateExecutor {
                 executePlanSteps(run, s, plan, orderedSteps, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir, true, executedAlwaysSteps);
 
                 if (stage == RunStage.TEST) {
+                    if (smokeTestConfigService.hasConfiguredOutputFile(plan)) {
+                        smokeTestConfigService.ensureGeneratedForTesting(plan, run, workDir);
+                    }
                     verifyTestResult(run, s, plan, needMain, mainRepoPath, extRepoByName, runDir, workDir);
                 }
 
@@ -308,6 +342,22 @@ public class UpdateExecutor {
 
                 return Optional.of(run);
             } catch (Exception e) {
+                if (stage == RunStage.TEST && smokeTestConfigService.hasConfiguredOutputFile(plan)) {
+                    try {
+                        smokeTestConfigService.ensureGeneratedForTesting(plan, run, workDir);
+                    } catch (Exception generateError) {
+                        auditLogService.warn(
+                                LogType.STEP_FAILED,
+                                "Smoke xUnit config generation failed: " + generateError.getMessage(),
+                                "{\"runId\":" + j(String.valueOf(run.getId()))
+                                        + ",\"error\":" + j(String.valueOf(generateError.getMessage())) + "}",
+                                null,
+                                "system",
+                                run.getId()
+                        );
+                    }
+                }
+
                 afterStageFailure(stage, tasks);
                 run.setStatus(RunStatus.FAILED);
                 run.setFinishedAt(OffsetDateTime.now());
@@ -535,6 +585,16 @@ public class UpdateExecutor {
                 throw new IllegalStateException("Special step extensionPlans is not supported inside extension plan");
             }
             executeExtensionPlans(run, s, plan, needMain, mainRepoPath, extRepoByName, extPlanFileKeyByName, extensions, runDir, workDir);
+            if (sd.isAlways()) {
+                executedAlwaysSteps.add(sd);
+            }
+            return;
+        }
+
+        if (isGenerateSmokeConfigStep(sd)) {
+            if (run.getStage() == RunStage.TEST) {
+                smokeTestConfigService.generateForTesting(plan, run, workDir);
+            }
             if (sd.isAlways()) {
                 executedAlwaysSteps.add(sd);
             }
@@ -830,6 +890,10 @@ public class UpdateExecutor {
             Path runDir,
             Path workDir
     ) throws Exception {
+        if (!shouldVerifyTestResult(plan)) {
+            return;
+        }
+
         String configured = plan.getTestResultFile();
         if (!StringUtils.hasText(configured)) {
             return;
@@ -889,6 +953,10 @@ public class UpdateExecutor {
         return sd != null && "extensionplans".equals(norm(sd.getSpecial()));
     }
 
+    private static boolean isGenerateSmokeConfigStep(RunStepDef sd) {
+        return sd != null && "generatesmokeconfig".equals(norm(sd.getSpecial()));
+    }
+
     private static boolean shouldGenerateSmokeConfig(RunStepDef sd) {
         if (sd == null) {
             return false;
@@ -903,12 +971,48 @@ public class UpdateExecutor {
                 || containsSmokeConfigToken(sd.getRetry().getOnFailCommand())));
     }
 
+    private static boolean shouldVerifyTestResult(RunPlan plan) {
+        if (plan == null || plan.getSteps() == null || plan.getSteps().isEmpty()) {
+            return false;
+        }
+        for (RunStepDef step : plan.getSteps()) {
+            if (step == null || !step.isEnabled()) {
+                continue;
+            }
+            String code = norm(step.getCode());
+            if ("smoke_tests".equals(code) || "smoketests".equals(code)) {
+                return true;
+            }
+            if (containsTestResultToken(step.getCommand())) {
+                return true;
+            }
+            if (step.getRetry() != null
+                    && (containsTestResultToken(step.getRetry().getCheckCommand())
+                    || containsTestResultToken(step.getRetry().getOnFailCommand()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean containsSmokeConfigToken(List<String> command) {
         if (command == null || command.isEmpty()) {
             return false;
         }
         for (String arg : command) {
             if (arg != null && (arg.contains("{{xunitConfigFile}}") || arg.contains("{{smokeConfigFile}}"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsTestResultToken(List<String> command) {
+        if (command == null || command.isEmpty()) {
+            return false;
+        }
+        for (String arg : command) {
+            if (arg != null && (arg.contains("{{testResultFile}}") || arg.contains("{{test-result-file}}"))) {
                 return true;
             }
         }

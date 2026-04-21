@@ -65,6 +65,7 @@ public class SettingsService {
         Settings s = get();
 
         s.setAutoUpdateEnabled(patch.isAutoUpdateEnabled());
+        s.setDependencyGraphRebuildEnabled(patch.isDependencyGraphRebuildEnabled());
         s.setTestRunTime(patch.getTestRunTime());
         s.setNextTestRunDate(patch.getNextTestRunDate());
         s.setProductionRunTime(patch.getProductionRunTime());
@@ -82,7 +83,9 @@ public class SettingsService {
         Settings saved = settingsRepository.save(s);
 
         auditLogService.info(LogType.SETTINGS_CHANGED, "Settings updated",
-                "{\"autoUpdateEnabled\":" + saved.isAutoUpdateEnabled() + "}", clientIp, actor, null);
+                "{\"autoUpdateEnabled\":" + saved.isAutoUpdateEnabled()
+                        + ",\"dependencyGraphRebuildEnabled\":" + saved.isDependencyGraphRebuildEnabled() + "}",
+                clientIp, actor, null);
 
         return saved;
     }

@@ -41,6 +41,32 @@ public class SmokeTestConfigService {
         return outputFile;
     }
 
+    public boolean hasConfiguredOutputFile(RunPlan plan) {
+        if (plan == null) {
+            return false;
+        }
+        if (StringUtils.hasText(plan.getXunitConfigFile())) {
+            return true;
+        }
+        if (plan.getSettings() == null) {
+            return false;
+        }
+        return StringUtils.hasText(firstNonBlank(
+                plan.getSettings().get("xunitConfigFile"),
+                plan.getSettings().get("xunit-config-file"),
+                plan.getSettings().get("smokeConfigFile"),
+                plan.getSettings().get("smoke-config-file")
+        ));
+    }
+
+    public Path ensureGeneratedForTesting(RunPlan plan, ExecutionRun run, Path workDir) throws IOException {
+        Path outputFile = prepareOutputFile(plan, workDir);
+        if (Files.exists(outputFile)) {
+            return outputFile;
+        }
+        return generateForTesting(plan, run, workDir);
+    }
+
     @Transactional(readOnly = true)
     public Path generateForTesting(RunPlan plan, ExecutionRun run, Path workDir) throws IOException {
         Path outputFile = prepareOutputFile(plan, workDir);

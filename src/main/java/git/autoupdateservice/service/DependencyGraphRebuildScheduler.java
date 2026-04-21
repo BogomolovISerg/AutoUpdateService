@@ -2,6 +2,8 @@ package git.autoupdateservice.service;
 
 import git.autoupdateservice.domain.DependencyGraphState;
 import git.autoupdateservice.domain.LogType;
+import git.autoupdateservice.domain.Settings;
+import git.autoupdateservice.repo.SettingsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,6 +17,7 @@ public class DependencyGraphRebuildScheduler {
     private final DependencyGraphStateService dependencyGraphStateService;
     private final DependencyGraphRebuildCoordinator dependencyGraphRebuildCoordinator;
     private final AuditLogService auditLogService;
+    private final SettingsRepository settingsRepository;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -25,22 +28,29 @@ public class DependencyGraphRebuildScheduler {
         }
 
         try {
+            Settings settings = settingsRepository.findById(1L).orElse(null);
+            if (settings != null && !settings.isDependencyGraphRebuildEnabled()) {
+                return;
+            }
+
             DependencyGraphState state = dependencyGraphStateService.getState();
             if (state == null || !state.isGraphIsStale()) {
                 return;
             }
 
-            auditLogService.info(
-                    LogType.WEBHOOK_RECEIVED,
-                    "Dependency graph rebuild requested automatically",
-                    "{\"staleSince\":" + json(state.getStaleSince() == null ? "" : String.valueOf(state.getStaleSince()))
-                            + ",\"staleReason\":" + json(state.getStaleReason() == null ? "" : state.getStaleReason()) + "}",
-                    null,
-                    "system",
-                    null
-            );
-
-            dependencyGraphRebuildCoordinator.startIfStaleAsync("scheduled rebuild", null);
+            DependencyGraphRebuildCoordinator.StartResult startResult =
+                    dependencyGraphRebuildCoordinator.startIfStaleAsync("scheduled rebuild", null);
+            if (startResult.started()) {
+                auditLogService.info(
+                        LogType.WEBHOOK_RECEIVED,
+                        "Dependency graph rebuild requested automatically",
+                        "{\"staleSince\":" + json(state.getStaleSince() == null ? "" : String.valueOf(state.getStaleSince()))
+                                + ",\"staleReason\":" + json(state.getStaleReason() == null ? "" : state.getStaleReason()) + "}",
+                        null,
+                        "system",
+                        null
+                );
+            }
         } catch (Exception e) {
             auditLogService.warn(
                     LogType.WEBHOOK_RECEIVED,

@@ -31,6 +31,10 @@
                     <label><input type="checkbox" th:field="*{autoUpdateEnabled}"/> Автообновление включено</label>
                     <p class="small">Новых задач в очереди сейчас: <b th:text="${pendingNewCount}">0</b></p>
                 </div>
+                <div class="col-12">
+                    <label><input type="checkbox" th:field="*{dependencyGraphRebuildEnabled}"/> Пересчет графа зависимостей включен</label>
+                    <p class="small">Если выключить, при устаревшем графе TEST-прогон будет продолжен по текущему snapshot без ожидания пересчета.</p>
+                </div>
 
                 <div class="col-6">
                     <label>Дата ближайшего запуска тестовой базы</label>
