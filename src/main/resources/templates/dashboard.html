@@ -75,7 +75,7 @@
             </thead>
             <tbody>
             <tr th:each="t : ${recentNewTasks}">
-                <td th:text="${t.createdAt}">—</td>
+                <td th:text="${createdAtFmt[T(java.lang.String).valueOf(t.id)]} ?: '—'">—</td>
                 <td th:text="${t.projectPath}">—</td>
                 <td th:text="${t.targetType}">—</td>
                 <td th:text="${t.extensionName} ?: '—'">—</td>

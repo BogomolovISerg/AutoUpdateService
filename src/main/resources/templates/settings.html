@@ -44,10 +44,6 @@
                     <label>Время запуска тестовой базы</label>
                     <input class="input" type="time" th:field="*{testRunTime}"/>
                 </div>
-                <div class="col-6">
-                    <label>Количество попыток</label>
-                    <input class="input" type="number" min="1" th:field="*{closedMaxAttempts}"/>
-                </div>
 
                 <div class="col-6">
                     <label>Дата ближайшего запуска рабочей базы</label>
@@ -59,12 +55,17 @@
                 </div>
 
                 <div class="col-6">
-                    <label>Часовой пояс</label>
-                    <input class="input" type="text" th:field="*{timezone}"/>
+                    <label>Количество попыток</label>
+                    <input class="input" type="number" min="1" th:field="*{closedMaxAttempts}"/>
                 </div>
                 <div class="col-6">
                     <label>Ожидание между попытками, сек</label>
                     <input class="input" type="number" min="1" th:field="*{closedSleepSeconds}"/>
+                </div>
+
+                <div class="col-6">
+                    <label>Часовой пояс</label>
+                    <input class="input" type="text" th:field="*{timezone}"/>
                 </div>
 
                 <div class="col-6">

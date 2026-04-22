@@ -29,6 +29,9 @@ public class DashboardController {
     public String dashboard(Model model, Authentication auth) {
         var settings = settingsService.get();
         var recentRuns = executionRunRepository.findTop20ByOrderByStartedAtDesc();
+        var recentNewTasks = updateTaskRepository.findTop200ByStatusOrderByCreatedAtDesc(
+                git.autoupdateservice.domain.TaskStatus.NEW
+        );
 
         ZoneId zone;
         try {
@@ -39,6 +42,7 @@ public class DashboardController {
 
         Map<UUID, String> plannedForFmt = new HashMap<>();
         Map<UUID, String> dependencySnapshotFmt = new HashMap<>();
+        Map<String, String> createdAtFmt = new HashMap<>();
         for (var r : recentRuns) {
             if (r.getId() != null && r.getPlannedFor() != null) {
                 plannedForFmt.put(
@@ -50,13 +54,19 @@ public class DashboardController {
                 dependencySnapshotFmt.put(r.getId(), String.valueOf(r.getDependencySnapshot().getId()));
             }
         }
+        for (var t : recentNewTasks) {
+            if (t.getId() != null && t.getCreatedAt() != null) {
+                createdAtFmt.put(t.getId().toString(), t.getCreatedAt().atZoneSameInstant(zone).format(TS_FMT));
+            }
+        }
 
         model.addAttribute("settings", settings);
         model.addAttribute("pendingNewCount", updateTaskRepository.countByStatus(git.autoupdateservice.domain.TaskStatus.NEW));
-        model.addAttribute("recentNewTasks", updateTaskRepository.findTop200ByStatusOrderByCreatedAtDesc(git.autoupdateservice.domain.TaskStatus.NEW));
+        model.addAttribute("recentNewTasks", recentNewTasks);
         model.addAttribute("recentRuns", recentRuns);
         model.addAttribute("plannedForFmt", plannedForFmt);
         model.addAttribute("dependencySnapshotFmt", dependencySnapshotFmt);
+        model.addAttribute("createdAtFmt", createdAtFmt);
         model.addAttribute("actor", auth != null ? auth.getName() : "anonymous");
         return "dashboard";
     }

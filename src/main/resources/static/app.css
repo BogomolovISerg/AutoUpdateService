@@ -172,7 +172,11 @@ body {
     word-break: break-word;
 }
 
-.queue-table td:nth-child(3),
+.queue-table td:nth-child(3) {
+    text-align: left;
+    vertical-align: top;
+}
+
 .queue-table td:nth-child(7),
 .queue-table td:nth-child(8) {
     text-align: center;

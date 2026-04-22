@@ -1,6 +1,7 @@
 package git.autoupdateservice.security;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -16,6 +17,13 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final MustChangePasswordFilter mustChangePasswordFilter;
+    private final CustomUserDetailsService userDetailsService;
+
+    @Value("${app.security.remember-me-key:auto-update-service-remember-me-key-change-me}")
+    private String rememberMeKey;
+
+    @Value("${app.security.remember-me-validity-seconds:86400}")
+    private int rememberMeValiditySeconds;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -36,6 +44,20 @@ public class SecurityConfig {
                         .loginPage("/login")
                         .defaultSuccessUrl("/", false)
                         .permitAll()
+                )
+                .rememberMe(remember -> remember
+                        .key(rememberMeKey)
+                        .rememberMeCookieName("AUTO_UPDATE_REMEMBER_ME")
+                        .tokenValiditySeconds(rememberMeValiditySeconds)
+                        .userDetailsService(userDetailsService)
+                        .alwaysRemember(true)
+                )
+                .securityContext(securityContext -> securityContext
+                        .requireExplicitSave(false)
+                )
+                .sessionManagement(session -> session
+                        .invalidSessionUrl("/login?expired")
+                        .sessionFixation(sessionFixation -> sessionFixation.migrateSession())
                 )
                 .logout(Customizer.withDefaults());
 

@@ -10,6 +10,7 @@
     <div class="card" style="max-width:480px; margin:60px auto;">
         <h2>Вход</h2>
         <form method="post" th:action="@{/login}">
+            <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
             <div class="row" style="flex-direction:column; align-items:stretch;">
                 <label>Логин</label>
                 <input class="input" type="text" name="username"/>
@@ -19,6 +20,7 @@
             </div>
             <p class="small" th:if="${param.error}">Неверный логин или пароль</p>
             <p class="small" th:if="${param.logout}">Вы вышли</p>
+            <p class="small" th:if="${param.expired}">Сессия истекла, выполните вход повторно</p>
         </form>
     </div>
 </div>
