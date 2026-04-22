@@ -9,7 +9,9 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,9 +43,10 @@ public class DependencyGraphRebuildCoordinator {
         }
 
         synchronized (monitor) {
-            if (isRunningLocked() || dependencySnapshotRepository.existsByStatus(DependencySnapshotStatus.BUILDING)) {
+            if (isRunningLocked()) {
                 return new StartResult(false, true, activeSnapshot(state), true);
             }
+            markOrphanBuildingSnapshotsFailedLocked("before async rebuild");
 
             currentTask = executor.submit(() -> runRebuild(reason, runId));
             monitor.notifyAll();
@@ -72,7 +75,8 @@ public class DependencyGraphRebuildCoordinator {
             }
 
             boolean running = isRunning();
-            if (!running && !dependencySnapshotRepository.existsByStatus(DependencySnapshotStatus.BUILDING)) {
+            if (!running) {
+                markOrphanBuildingSnapshotsFailed("while waiting rebuild");
                 return WaitResult.failed(activeSnapshot, started, alreadyRunning);
             }
 
@@ -94,9 +98,10 @@ public class DependencyGraphRebuildCoordinator {
 
     public DependencySnapshot rebuildNowIfIdle(UUID runId) {
         synchronized (monitor) {
-            if (isRunningLocked() || dependencySnapshotRepository.existsByStatus(DependencySnapshotStatus.BUILDING)) {
+            if (isRunningLocked()) {
                 throw new IllegalStateException("Пересчет графа зависимостей уже выполняется");
             }
+            markOrphanBuildingSnapshotsFailedLocked("before manual rebuild");
             synchronousRunning = true;
         }
 
@@ -176,6 +181,47 @@ public class DependencyGraphRebuildCoordinator {
 
     private boolean isRunningLocked() {
         return synchronousRunning || (currentTask != null && !currentTask.isDone());
+    }
+
+    private void markOrphanBuildingSnapshotsFailed(String reason) {
+        synchronized (monitor) {
+            if (!isRunningLocked()) {
+                markOrphanBuildingSnapshotsFailedLocked(reason);
+            }
+        }
+    }
+
+    private void markOrphanBuildingSnapshotsFailedLocked(String reason) {
+        List<DependencySnapshot> buildingSnapshots =
+                dependencySnapshotRepository.findByStatusOrderByStartedAtAsc(DependencySnapshotStatus.BUILDING);
+        if (buildingSnapshots.isEmpty()) {
+            return;
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        for (DependencySnapshot snapshot : buildingSnapshots) {
+            snapshot.setStatus(DependencySnapshotStatus.FAILED);
+            snapshot.setFinishedAt(now);
+            snapshot.setNotes(appendNote(snapshot.getNotes(),
+                    "Сканирование помечено как завершенное с ошибкой: найден залипший статус BUILDING (" + reason + ")"));
+        }
+        dependencySnapshotRepository.saveAll(buildingSnapshots);
+
+        auditLogService.warn(
+                LogType.RUN_FAILED,
+                "Orphan dependency graph BUILDING snapshots marked FAILED",
+                "{\"count\":" + buildingSnapshots.size() + ",\"reason\":" + j(reason) + "}",
+                null,
+                "system",
+                null
+        );
+    }
+
+    private static String appendNote(String current, String note) {
+        if (current == null || current.isBlank()) {
+            return note;
+        }
+        return current + "\n" + note;
     }
 
     private static DependencySnapshot activeSnapshot(DependencyGraphState state) {

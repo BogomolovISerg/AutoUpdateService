@@ -64,6 +64,7 @@ public class SettingsController {
     @Data
     public static class SettingsForm {
         public boolean autoUpdateEnabled;
+        public boolean dependencyGraphRebuildEnabled;
         public LocalTime testRunTime;
         public LocalDate nextTestRunDate;
         public LocalTime productionRunTime;
@@ -79,9 +80,18 @@ public class SettingsController {
 
         public Boolean cancelPending;
 
+        public boolean isDependencyGraphRebuildEnabled() {
+            return dependencyGraphRebuildEnabled;
+        }
+
+        public void setDependencyGraphRebuildEnabled(boolean dependencyGraphRebuildEnabled) {
+            this.dependencyGraphRebuildEnabled = dependencyGraphRebuildEnabled;
+        }
+
         static SettingsForm from(Settings s) {
             SettingsForm f = new SettingsForm();
             f.autoUpdateEnabled = s.isAutoUpdateEnabled();
+            f.dependencyGraphRebuildEnabled = s.isDependencyGraphRebuildEnabled();
             f.testRunTime = s.getTestRunTime();
             f.nextTestRunDate = s.getNextTestRunDate();
             f.productionRunTime = s.getProductionRunTime();
@@ -101,6 +111,7 @@ public class SettingsController {
             Settings s = new Settings();
             s.setId(1L);
             s.setAutoUpdateEnabled(autoUpdateEnabled);
+            s.setDependencyGraphRebuildEnabled(dependencyGraphRebuildEnabled);
             s.setTestRunTime(testRunTime);
             s.setNextTestRunDate(nextTestRunDate);
             s.setProductionRunTime(productionRunTime);

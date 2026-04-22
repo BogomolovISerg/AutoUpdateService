@@ -187,6 +187,7 @@
     let treeOffset = 0;
     let treeLimit = 100;
     let treeTotal = null;
+    let treeHasMore = false;
 
     function esc(s) {
         return (s ?? '')
@@ -207,7 +208,7 @@
         const btn = document.getElementById('treeLoadMoreBtn');
         if (!btn) return;
 
-        const allLoaded = treeTotal !== null && treeOffset >= treeTotal;
+        const allLoaded = treeTotal !== null ? treeOffset >= treeTotal : !treeHasMore;
         btn.disabled = allLoaded;
         btn.textContent = allLoaded ? 'Все загружено' : 'Еще';
     }
@@ -217,7 +218,9 @@
         if (!status) return;
 
         if (treeTotal === null) {
-            status.textContent = 'Загрузка модулей...';
+            status.textContent = treeOffset > 0
+                ? 'Показано модулей: ' + treeOffset + (treeHasMore ? '. Нажмите "Еще" для следующей порции.' : '.')
+                : 'Загрузка модулей...';
             return;
         }
 
@@ -263,6 +266,23 @@
         updateMoreButton();
     }
 
+    async function fetchJsonWithTimeout(url, timeoutMs) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const resp = await fetch(url, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                signal: controller.signal
+            });
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status);
+            }
+            return await resp.json();
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     async function loadModules(reset) {
         const root = document.getElementById('treeRoot');
         const status = document.getElementById('treeStatus');
@@ -275,12 +295,9 @@
         if (reset) {
             treeOffset = 0;
             treeTotal = null;
+            treeHasMore = false;
             root.innerHTML = '';
             updateMoreButton();
-            await loadModuleCount();
-            if (treeTotal === 0) {
-                return;
-            }
         }
 
         status.textContent = 'Загрузка модулей...';
@@ -292,25 +309,25 @@
         params.set('limit', treeLimit);
         params.set('offset', treeOffset);
 
-        const resp = await fetch('/dependencies/tree/modules?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-
-        if (!resp.ok) {
-            status.textContent = 'Ошибка загрузки модулей';
+        let data;
+        try {
+            data = await fetchJsonWithTimeout('/dependencies/tree/modules?' + params.toString(), 60000);
+        } catch (e) {
+            status.textContent = 'Ошибка загрузки модулей. Запрос выполнялся слишком долго или завершился ошибкой.';
+            updateMoreButton();
             return;
         }
 
-        const data = await resp.json();
-
         if (reset && data.length === 0) {
             treeTotal = 0;
+            treeHasMore = false;
             updateTreeStatus();
             updateMoreButton();
             return;
         }
 
         if (data.length === 0) {
+            treeHasMore = false;
             updateTreeStatus();
             updateMoreButton();
             return;
@@ -336,8 +353,10 @@
         }
 
         treeOffset += data.length;
+        treeHasMore = data.length === treeLimit;
         updateTreeStatus();
         updateMoreButton();
+
     }
 
     async function onModuleToggle(detailsEl) {
@@ -360,16 +379,22 @@
         params.set('sourceName', sourceName);
         if (f.objectType) params.set('objectType', f.objectType);
 
-        const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
+        let data;
+        try {
+            const resp = await fetch('/dependencies/tree/methods?' + params.toString(), {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
 
-        if (!resp.ok) {
+            if (!resp.ok) {
+                container.innerHTML = '<div class="small">Ошибка загрузки методов</div>';
+                return;
+            }
+
+            data = await resp.json();
+        } catch (e) {
             container.innerHTML = '<div class="small">Ошибка загрузки методов</div>';
             return;
         }
-
-        const data = await resp.json();
 
         if (data.length === 0) {
             container.innerHTML = '<div class="small">Методов нет</div>';
@@ -424,16 +449,22 @@
         params.set('methodName', methodName);
         if (f.objectType) params.set('objectType', f.objectType);
 
-        const resp = await fetch('/dependencies/tree/objects?' + params.toString(), {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
+        let data;
+        try {
+            const resp = await fetch('/dependencies/tree/objects?' + params.toString(), {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
 
-        if (!resp.ok) {
+            if (!resp.ok) {
+                container.innerHTML = '<div class="small">Ошибка загрузки объектов</div>';
+                return;
+            }
+
+            data = await resp.json();
+        } catch (e) {
             container.innerHTML = '<div class="small">Ошибка загрузки объектов</div>';
             return;
         }
-
-        const data = await resp.json();
 
         if (data.length === 0) {
             container.innerHTML = '<div class="small">Объектов нет</div>';

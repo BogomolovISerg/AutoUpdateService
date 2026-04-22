@@ -18,13 +18,13 @@ public class DependencySearchMapper {
 
     public String normalizeLike(String query) {
         if (isBlank(query)) {
-            return null;
+            return "";
         }
         return "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
     }
 
     public String objectTypeName(DependencyCallerType objectType) {
-        return objectType == null ? null : objectType.name();
+        return objectType == null ? "" : objectType.name();
     }
 
     public DependencyTreeSearchService.ModuleNode toModuleNode(CommonModuleImpactRepository.ModuleAggRow row) {

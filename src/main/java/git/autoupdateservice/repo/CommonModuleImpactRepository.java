@@ -42,23 +42,41 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
     );
 
     @Query(value = """
+            with distinct_modules as (
+                select distinct
+                    coalesce(nullif(btrim(c.source_kind), ''), 'BASE') as sourceKind,
+                    coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') as sourceName,
+                    c.common_module_name as commonModuleName
+                from common_module_impact c
+                where c.snapshot_id = :snapshotId
+                  and (:q = '' or lower(c.common_module_name) like :q)
+                  and (:objectType = '' or c.object_type = :objectType)
+            ),
+            page_modules as (
+                select *
+                from distinct_modules
+                order by commonModuleName,
+                         case when sourceKind = 'BASE' then 0 else 1 end,
+                         sourceName
+                limit :limit offset :offset
+            )
             select
-                coalesce(nullif(btrim(c.source_kind), ''), 'BASE') as sourceKind,
-                coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') as sourceName,
-                c.common_module_name as commonModuleName,
+                m.sourceKind as sourceKind,
+                m.sourceName as sourceName,
+                m.commonModuleName as commonModuleName,
                 count(distinct c.common_module_member_name) as methodCount,
                 count(distinct (coalesce(c.object_type, '') || '|' || coalesce(c.object_name, ''))) as objectCount
-            from common_module_impact c
-            where c.snapshot_id = :snapshotId
-              and (:q is null or lower(c.common_module_name) like :q)
-              and (:objectType is null or c.object_type = :objectType)
-            group by coalesce(nullif(btrim(c.source_kind), ''), 'BASE'),
-                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация'),
-                     c.common_module_name
-            order by c.common_module_name,
-                     case when coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = 'BASE' then 0 else 1 end,
-                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация')
-            limit :limit offset :offset
+            from page_modules m
+            left join common_module_impact c
+              on c.snapshot_id = :snapshotId
+             and coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = m.sourceKind
+             and coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') = m.sourceName
+             and c.common_module_name = m.commonModuleName
+             and (:objectType = '' or c.object_type = :objectType)
+            group by m.sourceKind, m.sourceName, m.commonModuleName
+            order by m.commonModuleName,
+                     case when m.sourceKind = 'BASE' then 0 else 1 end,
+                     m.sourceName
             """, nativeQuery = true)
     List<ModuleAggRow> findModuleNodes(
             @Param("snapshotId") UUID snapshotId,
@@ -72,8 +90,8 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
             select count(distinct (coalesce(nullif(btrim(c.source_kind), ''), 'BASE') || '|' || coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') || '|' || c.common_module_name))
             from common_module_impact c
             where c.snapshot_id = :snapshotId
-              and (:q is null or lower(c.common_module_name) like :q)
-              and (:objectType is null or c.object_type = :objectType)
+              and (:q = '' or lower(c.common_module_name) like :q)
+              and (:objectType = '' or c.object_type = :objectType)
             """, nativeQuery = true)
     long countModuleNodes(
             @Param("snapshotId") UUID snapshotId,
@@ -92,7 +110,7 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
               and c.common_module_name = :moduleName
               and c.common_module_member_name is not null
               and c.common_module_member_name <> ''
-              and (:objectType is null or c.object_type = :objectType)
+              and (:objectType = '' or c.object_type = :objectType)
             group by c.common_module_member_name
             order by c.common_module_member_name
             """, nativeQuery = true)
@@ -114,7 +132,7 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
               and coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') = :sourceName
               and c.common_module_name = :moduleName
               and c.common_module_member_name = :methodName
-              and (:objectType is null or c.object_type = :objectType)
+              and (:objectType = '' or c.object_type = :objectType)
             order by c.object_type, c.object_name
             """, nativeQuery = true)
     List<ObjectRow> findObjectNodes(

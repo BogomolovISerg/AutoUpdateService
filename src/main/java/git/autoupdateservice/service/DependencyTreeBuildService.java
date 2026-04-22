@@ -49,6 +49,7 @@ public class DependencyTreeBuildService {
     private final DependencyTreeSearchService dependencyTreeSearchService;
     private final DependencyScanLogRepository dependencyScanLogRepository;
     private final ChangedObjectService changedObjectService;
+    private final DependencySnapshotCleanupService dependencySnapshotCleanupService;
 
     public DependencySnapshot fullRebuild() {
         CodeSourceRoot sourceRoot = codeSourceRootRepository
@@ -93,6 +94,7 @@ public class DependencyTreeBuildService {
                             + ", edges=" + artifacts.edgesSaved()
                             + ", impacts=" + artifacts.impactsSaved(),
                     null);
+            dependencySnapshotCleanupService.cleanupOldSnapshotsAsync(snapshot.getId());
             return snapshot;
         } catch (Exception e) {
             snapshot.setStatus(DependencySnapshotStatus.FAILED);
