@@ -43,6 +43,7 @@ public class UpdateExecutor {
     private final ChangedObjectService changedObjectService;
     private final SmokeTestConfigService smokeTestConfigService;
     private final TaskChangedFileService taskChangedFileService;
+    private final DependencySnapshotCleanupService dependencySnapshotCleanupService;
 
     @Value("${app.dependency-graph.test-wait-minutes:60}")
     private long dependencyGraphTestWaitMinutes;
@@ -256,6 +257,7 @@ public class UpdateExecutor {
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
                 executionRunRepository.save(run);
+                cleanupOldDependencySnapshotsAsync(run);
                 auditLogService.info(LogType.RUN_FINISHED, "Nothing to do", "{\"stage\":" + j(stage.name()) + "}", null, "system", run.getId());
                 return Optional.of(run);
             }
@@ -334,6 +336,7 @@ public class UpdateExecutor {
                 run.setStatus(RunStatus.SUCCESS);
                 run.setFinishedAt(OffsetDateTime.now());
                 executionRunRepository.save(run);
+                cleanupOldDependencySnapshotsAsync(run);
 
                 auditLogService.info(LogType.RUN_FINISHED,
                         "Run finished successfully. tasks=" + tasks.size(),
@@ -363,6 +366,7 @@ public class UpdateExecutor {
                 run.setFinishedAt(OffsetDateTime.now());
                 run.setErrorSummary(trim(PasswordMasker.maskText(e.getMessage()), 3500));
                 executionRunRepository.save(run);
+                cleanupOldDependencySnapshotsAsync(run);
 
                 auditLogService.error(LogType.RUN_FINISHED, "Run failed: " + e.getMessage(),
                         "{\"stage\":" + j(stage.name()) + ",\"error\":" + j(String.valueOf(e.getMessage())) + "}", null, "system", run.getId());
@@ -878,6 +882,26 @@ public class UpdateExecutor {
             updateTaskRepository.saveAll(tasks);
         }
         changedObjectService.markTestingFailed();
+    }
+
+    private void cleanupOldDependencySnapshotsAsync(ExecutionRun run) {
+        try {
+            DependencyGraphState state = dependencyGraphStateService.getState();
+            DependencySnapshot activeSnapshot = state == null ? null : state.getActiveSnapshot();
+            if (activeSnapshot != null && activeSnapshot.getId() != null) {
+                dependencySnapshotCleanupService.cleanupOldSnapshotsAsync(activeSnapshot.getId());
+            }
+        } catch (Exception e) {
+            auditLogService.warn(
+                    LogType.RUN_FAILED,
+                    "Dependency snapshot cleanup scheduling failed: " + e.getMessage(),
+                    "{\"runId\":" + j(run == null ? "" : String.valueOf(run.getId()))
+                            + ",\"error\":" + j(String.valueOf(e.getMessage())) + "}",
+                    null,
+                    "system",
+                    run == null ? null : run.getId()
+            );
+        }
     }
 
     private void verifyTestResult(

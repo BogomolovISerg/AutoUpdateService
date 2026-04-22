@@ -23,6 +23,12 @@ public class DependencySnapshotCleanupService {
             where s.id <> ?
               and s.id <> coalesce((select active_snapshot_id from public.dependency_graph_state where id = 1), ?)
               and s.status <> 'BUILDING'
+              and not exists (
+                  select 1
+                  from public.execution_run r
+                  where r.dependency_snapshot_id = s.id
+                    and r.status = 'RUNNING'
+              )
               and s.started_at < ?
             """;
 
