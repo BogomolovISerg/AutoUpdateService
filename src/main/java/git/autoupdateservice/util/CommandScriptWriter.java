@@ -8,10 +8,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Пишет "человеческий" скрипт для повторения запуска команды рядом с логами.
- * На Windows — .cmd с переносами через ^ и установкой кодовой страницы (chcp).
- */
 public final class CommandScriptWriter {
     private CommandScriptWriter() {}
 

@@ -61,10 +61,8 @@ public class SecurityConfig {
                 )
                 .logout(Customizer.withDefaults());
 
-        // CSRF: отключаем только для внешних API. Доступ к ним дополнительно защищается токеном.
         http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/gitlab/webhook", "/api/test-objects"));
 
-        // принудительная смена пароля после логина
         http.addFilterAfter(mustChangePasswordFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

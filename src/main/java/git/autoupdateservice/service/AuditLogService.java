@@ -28,11 +28,7 @@ public class AuditLogService {
         save(type, LogLevel.ERROR, message, dataJson, clientIp, actor, runId);
     }
 
-    /**
-     * Варианты методов, которые возвращают созданное событие.
-     * Нужны, когда надо привязать к событию дополнительные данные (например, полный текст логов шага).
-     */
-    public LogEvent infoReturn(LogType type, String message, String dataJson, String clientIp, String actor, UUID runId) {
+   public LogEvent infoReturn(LogType type, String message, String dataJson, String clientIp, String actor, UUID runId) {
         return saveReturn(type, LogLevel.INFO, message, dataJson, clientIp, actor, runId);
     }
 
@@ -75,17 +71,14 @@ public class AuditLogService {
         String s = dataJson.trim();
         if (s.isEmpty()) return "{}";
 
-        // Если это уже валидный JSON — оставляем как есть.
         try {
             OM.readTree(s);
             return s;
         } catch (Exception ignore) {
-            // Иначе заворачиваем как текст (JSON-строку) — чтобы БД не ругалась.
             try {
                 String quoted = OM.writeValueAsString(s);
                 return "{\"text\":" + quoted + "}";
             } catch (Exception e) {
-                // совсем аварийный вариант
                 String safe = s.replace("\\", "\\\\").replace("\"", "\\\"");
                 return "{\"text\":\"" + safe + "\"}";
             }

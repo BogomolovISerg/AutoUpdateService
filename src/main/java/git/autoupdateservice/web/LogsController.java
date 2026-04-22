@@ -44,7 +44,6 @@ public class LogsController {
 
         ZoneId zone = resolveZone();
 
-        // если пользователь перепутал даты местами — чиняем
         if (from != null && to != null && from.isAfter(to)) {
             LocalDate tmp = from; from = to; to = tmp;
         }
@@ -63,7 +62,6 @@ public class LogsController {
         var p = logEventRepository.search(fromTs, toTs, pageable);
         List<LogEvent> list = p.getContent();
 
-        // Группировка по дате (защита от ts == null)
         Map<LocalDate, List<LogEvent>> grouped = list.stream()
                 .collect(Collectors.groupingBy(
                         e -> e.getTs() == null
@@ -73,7 +71,6 @@ public class LogsController {
                         Collectors.toList()
                 ));
 
-        // Форматирование ts в читаемый вид (ключи UUID, чтобы совпадали с e.id в шаблоне)
         var tsFmt = new HashMap<UUID, String>();
         for (var e : list) {
             if (e.getId() != null && e.getTs() != null) {
@@ -81,7 +78,6 @@ public class LogsController {
             }
         }
 
-        // Чтобы в списке показать ссылку "подробнее" только там, где есть сохранённые step-логи.
         Set<UUID> withDetails;
         try {
             List<UUID> ids = list.stream()

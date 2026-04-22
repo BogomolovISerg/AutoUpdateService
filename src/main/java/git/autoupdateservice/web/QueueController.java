@@ -59,7 +59,6 @@ public class QueueController {
         model.addAttribute("to", to);
         model.addAttribute("status", status);
 
-        // форматирование created_at в читаемый вид
         ZoneId zone;
         try { zone = ZoneId.of(s.getTimezone()); } catch (Exception e) { zone = ZoneId.systemDefault(); }
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
@@ -72,7 +71,6 @@ public class QueueController {
         }
         model.addAttribute("createdAtFmt", createdAtFmt);
 
-        // счётчики для UI (опционально, но удобно)
         model.addAttribute("countNew", updateTaskRepository.countByStatus(TaskStatus.NEW));
         model.addAttribute("countCanceled", updateTaskRepository.countByStatus(TaskStatus.CANCELED));
         model.addAttribute("countUpdated", updateTaskRepository.countByStatus(TaskStatus.UPDATED));

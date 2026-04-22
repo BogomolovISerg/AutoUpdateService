@@ -33,7 +33,6 @@ public class MustChangePasswordFilter extends OncePerRequestFilter {
             return;
         }
 
-        // allow specific endpoints
         if (path.equals("/login") || path.equals("/logout") || path.equals("/account/change-password") ||
                 path.startsWith("/api/gitlab") || path.endsWith(".css")) {
             filterChain.doFilter(request, response);

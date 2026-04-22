@@ -1,4 +1,4 @@
-/* базовый reset для предсказуемой вёрстки */
+
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
@@ -57,9 +57,6 @@ body {
 .col-6 { grid-column: span 6; }
 .col-12 { grid-column: span 12; }
 
-/* ---------------------------------------------------------
-   DASHBOARD
-   --------------------------------------------------------- */
 .dashboard-top {
     display: flex;
     gap: 12px;
@@ -126,7 +123,6 @@ body {
     word-break: break-word;
 }
 
-/* Таблицы */
 .table-wrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {
@@ -138,13 +134,11 @@ body {
 }
 .table th { font-weight: 700; color: #111827; }
 
-/* Разрешаем переносы только там, где нужно (message/comment и т.п.) */
 .table td.wrap {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-/* Фиксы ширин по ключевым таблицам */
 .queue-table {
     table-layout: fixed;
 }
@@ -219,27 +213,22 @@ body {
 .logs-table th:nth-child(5), .logs-table td:nth-child(5) { min-width: 150px; } /* ip */
 .logs-table th:nth-child(6), .logs-table td:nth-child(6) { min-width: 520px; } /* message */
 
-/* ---------------------------------------------------------
-   ЛОГИ: компактные строки + одинаковое выравнивание по высоте
-   (важно: перебиваем общий .table td { white-space: nowrap; })
-   --------------------------------------------------------- */
 .logs-table th,
 .logs-table td {
     padding: 4px 8px;
     line-height: 1.2;
     vertical-align: top;
-    white-space: normal; /* критично: убираем nowrap для логов */
+    white-space: normal;
 }
 
 .logs-table td.wrap {
-    white-space: pre-wrap; /* переносы + сохранение \n */
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
 .logs-table td.wrap > div { margin: 0; }
 .logs-table td.wrap .small { margin-top: 2px; line-height: 1.2; }
 
-/* Пагинация */
 .pager {
     display: flex;
     gap: 10px;
@@ -247,7 +236,6 @@ body {
     flex-wrap: wrap;
 }
 
-/* Статусы */
 .badge {
     display: inline-flex;
     align-items: center;
@@ -263,7 +251,6 @@ body {
 .badge.CANCELED { background: #fee2e2; }
 .badge.UPDATED { background: #dcfce7; }
 
-/* Кнопки */
 .btn {
     border: 0;
     border-radius: 10px;
@@ -286,7 +273,6 @@ body {
 .btn.secondary { background: #6b7280; }
 .btn.danger { background: #b91c1c; }
 
-/* Поля ввода */
 .input {
     width: 100%;
     padding: 8px 10px;
@@ -297,7 +283,6 @@ body {
 
 .small { color: #6b7280; font-size: 12px; }
 
-/* Просмотр больших логов */
 .log-pre {
     margin: 0;
     padding: 12px;
@@ -313,12 +298,10 @@ body {
     line-height: 1.4;
 }
 
-/* Горизонтальные формы (фильтры) */
 .row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
 .row > div:not(.row-actions) { display:flex; flex-direction:column; gap:6px; min-width: 210px; flex: 1 1 240px; }
 .row-actions { display:flex; gap:10px; align-items:flex-end; margin-left:auto; flex: 0 0 auto; }
 
-/* Сетка настроек */
 .settings-grid > div {
     display: flex;
     flex-direction: column;
@@ -326,14 +309,12 @@ body {
 }
 .settings-grid label { margin-top: 0; }
 
-/* Формы в карточках */
 .card label { display:block; margin-top: 12px; font-weight: 600; }
 .card label.small { font-weight: 500; margin-top: 0; }
 .card input[type="checkbox"] { margin-right: 6px; }
 
 hr { border: 0; border-top: 1px solid #e5e7eb; margin: 12px 0; }
 
-/* Адаптив */
 @media (max-width: 900px) {
     .col-6 { grid-column: span 12; }
     .row > div:not(.row-actions) { min-width: 160px; flex: 1 1 200px; }

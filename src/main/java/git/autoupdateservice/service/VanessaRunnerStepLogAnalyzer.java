@@ -6,18 +6,6 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Анализатор логов vanessa-runner.
- *
- * Правила основаны на примерах в "Лог шагов.txt":
- *  - КРИТИЧНАЯОШИБКА => ошибка (в summary выводим только текст ошибки без модуля/строки)
- *  - ОШИБКА - ...    => ошибка (берём последнее сообщение)
- *  - Отдельные "скрытые" ошибки без тега (например "расширение ... не найдено")
- *  - Для SESSION_CLOSED: наличие списка session : ... трактуем как "сессии ещё есть" (для ретраев)
- *
- * Для успеха: в summary берём "результат" из конца лога (после последней строки ОТЛАДКА - ...),
- * либо хвост блока ИНФОРМАЦИЯ для консольных команд (шаг 7).
- */
 @Component
 public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
 
@@ -35,27 +23,23 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
 
         String combined = joinNonBlank(debug, stdout, stderr);
 
-        // 1) SESSION_CLOSED: если в логе есть session : ... => сессии не закрыты.
         if (stepCode != null && stepCode.toUpperCase(Locale.ROOT).contains("SESSION_CLOSED")) {
             if (combined.contains("session                          :") || combined.contains("session :")) {
                 return Analysis.error("Сеансы не закрыты (найдены активные сессии)");
             }
         }
 
-        // 2) Явные ошибки: ОШИБКА - ... (берём последнюю)
         String lastErr = lastMatchGroup(ERR_LINE, combined, 1);
         if (notBlank(lastErr)) {
             return Analysis.error(lastErr.trim());
         }
 
-        // 3) Критическая ошибка: вырезаем только "человеческое" сообщение
         if (CRIT_LINE.matcher(combined).find()) {
             String msg = extractCriticalMessage(combined);
             if (notBlank(msg)) return Analysis.error(msg);
             return Analysis.error("Критическая ошибка (см. детали)");
         }
 
-        // 4) "Скрытая" ошибка без тега: расширение не найдено
         Matcher m = EXT_NOT_FOUND.matcher(combined);
         if (m.find()) {
             String ext = m.group(1);
@@ -63,11 +47,9 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
             return Analysis.error(line);
         }
 
-        // 5) Итог для web: результат из конца лога
         String primary = notBlank(debug) ? debug : joinNonBlank(stdout, stderr);
         String summary = extractResultFromEnd(primary);
 
-        // 6) Для LOADREPO_MAIN добавляем список объектов, полученных из хранилища
         if (stepCode != null && stepCode.toUpperCase(Locale.ROOT).contains("LOADREPO_MAIN")) {
             List<String> objs = extractStorageObjects(primary);
             if (!objs.isEmpty()) {
@@ -94,7 +76,6 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
     }
 
     private static String extractCriticalMessage(String text) {
-        // 1) если перед КРИТИЧНАЯОШИБКА уже была строка "ОШИБКА - ..." — обычно она самая понятная
         String lastErr = lastMatchGroup(ERR_LINE, text, 1);
         if (notBlank(lastErr)) return lastErr.trim();
 
@@ -106,7 +87,6 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
         if (end <= brace) end = text.length();
         String inner = text.substring(brace + 1, end).trim();
 
-        // Убираем "Модуль ..." и "Ошибка в строке: ..." из формата "{Модуль ... / Ошибка в строке: ... / <сообщение>}"
         List<String> kept = new ArrayList<>();
         for (String part : inner.split("\\s*/\\s*")) {
             String p = part.trim();
@@ -116,7 +96,6 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
             kept.add(p);
         }
         String msg = String.join(" / ", kept).trim();
-        // иногда внутри остаётся вложенное "{Модуль ...}" — выкидываем, если оно ничего не даёт
         msg = msg.replaceAll("\\{Модуль.*?\\}", "").trim();
         msg = msg.replaceAll("\n{3,}", "\n\n").trim();
         return msg;
@@ -137,7 +116,6 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
             return notBlank(out) ? out : null;
         }
 
-        // Консольные команды: берём последний блок ИНФОРМАЦИЯ
         return lastInfoBlock(text);
     }
 
@@ -155,7 +133,6 @@ public class VanessaRunnerStepLogAnalyzer implements StepLogAnalyzer {
                 start--;
                 continue;
             }
-            // допускаем продолжение блока (строки без префикса) если сверху была ИНФОРМАЦИЯ
             if (!ln.startsWith("ОТЛАДКА -") && !ln.startsWith("КРИТИЧНАЯОШИБКА") && !ln.startsWith("ОШИБКА")) {
                 start--;
                 continue;

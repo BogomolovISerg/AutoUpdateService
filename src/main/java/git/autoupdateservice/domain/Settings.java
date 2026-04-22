@@ -48,7 +48,6 @@ public class Settings {
     @Column(name = "closed_sleep_seconds", nullable = false)
     private int closedSleepSeconds = 15;
 
-    // UI pagination
     @Column(name = "queue_page_size", nullable = false)
     private int queuePageSize = 50;
 

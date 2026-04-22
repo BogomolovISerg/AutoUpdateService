@@ -9,12 +9,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-/**
- * Полный текст логов шага (stdout/stderr/debug) для детального просмотра через web-интерфейс.
- *
- * В списке логов показываем только "результат" выполнения (хвост/итог),
- * а полный текст хранится отдельно.
- */
 @Entity
 @Table(name = "step_log_blob",
         indexes = {
@@ -29,9 +23,6 @@ public class StepLogBlob {
     @GeneratedValue
     private UUID id;
 
-    /**
-     * Ссылка на событие log_event (обычно STEP_FINISHED/STEP_FAILED).
-     */
     @Column(name = "event_id", nullable = false)
     private UUID eventId;
 

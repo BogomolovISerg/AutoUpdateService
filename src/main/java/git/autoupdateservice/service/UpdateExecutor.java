@@ -275,7 +275,6 @@ public class UpdateExecutor {
             Path runDir = logRoot.resolve("run-" + run.getId());
             Path workDir = runDir;
 
-            // Precompute repo paths (from tasks; fallback to runner.* properties if task repo_path is empty)
             String mainRepoPath = null;
             if (needMain) {
                 mainRepoPath = tasks.stream()
@@ -691,7 +690,6 @@ public class UpdateExecutor {
         String extFile = (ext == null) ? null : resolveExtensionPlanFileKey(extPlanFileKeyByName, ext);
         String extRepoPath = (ext == null) ? null : extRepoByName.get(ext);
         if (ext != null && (extRepoPath == null || extRepoPath.isBlank())) {
-            // fallback to runner.extRepoPath (single repo for all extensions)
             extRepoPath = firstNonBlank(
                     runStepCommandService.planValue(plan.getSettings(), "extRepoPath", "ext-repo-path"),
                     runnerProperties.extRepoPath()
@@ -701,7 +699,6 @@ public class UpdateExecutor {
             throw new IllegalStateException("Repo path not found for extension=" + ext + " (task.repoPath empty and runner.extRepoPath not set)");
         }
 
-        // Важно: команды статичны и задаются в JSON. Здесь только подстановка токенов.
         if (sd.getRetry() != null && sd.getRetry().getCheckCommand() != null && !sd.getRetry().getCheckCommand().isEmpty()) {
             runRetryStep(run, s, plan, sd, needMain, mainRepoPath, extRepoPath, ext, extFile, runDir, workDir);
             return;
@@ -779,7 +776,6 @@ public class UpdateExecutor {
             int exit = runStepExecutor.executeAllowFailure(run, checkCode, checkTitle, checkCmd, workDir);
             if (exit == 0) return;
 
-            // onFail: например session kill (не валим весь запуск, просто логируем; дальше будет sleep и новая попытка)
             if (r.getOnFailCommand() != null && !r.getOnFailCommand().isEmpty()) {
                 String failCode = baseCode + "_ONFAIL" + attempt;
                 String failTitle = baseTitle + " (onFail, попытка " + attempt + ")";

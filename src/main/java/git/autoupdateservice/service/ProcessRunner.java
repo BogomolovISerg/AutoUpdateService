@@ -50,10 +50,6 @@ public class ProcessRunner {
         return new Result(code, ms, stdoutFile, stderrFile);
     }
 
-    /**
-     * На Windows исполняем именно .cmd-файл, а не одну длинную строку через cmd /c "...".
-     * Это убирает расхождение между тем, что сохранено в cmd, и тем, что реально запускается.
-     */
     private List<String> buildOsCommand(List<String> command, Path workDir, Path stdoutFile) throws IOException {
         if (!Platform.isWindows()) {
             return command;

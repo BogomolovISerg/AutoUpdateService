@@ -28,9 +28,6 @@ public class SettingsService {
         });
     }
 
-    /**
-     * Единая нормализация размеров страниц (чтобы не сломать UI и БД слишком большими значениями).
-     */
     public static int normalizePageSize(Integer value, int fallback) {
         int v = (value == null || value <= 0) ? fallback : value;
         if (v < 10) return 10;
@@ -42,9 +39,6 @@ public class SettingsService {
         return updateTaskRepository.countByStatus(TaskStatus.NEW);
     }
 
-    /**
-     * Отменяет часть "NEW" задач (для подтверждения выключения автообновления).
-     */
     @Transactional
     public void cancelPendingNewTasks(String clientIp, String actor) {
         var tasks = updateTaskRepository.findTop200ByStatusOrderByCreatedAtDesc(TaskStatus.NEW);
@@ -74,7 +68,6 @@ public class SettingsService {
         s.setClosedMaxAttempts(patch.getClosedMaxAttempts());
         s.setClosedSleepSeconds(patch.getClosedSleepSeconds());
 
-        // pagination
         s.setQueuePageSize(normalizePageSize(patch.getQueuePageSize(), s.getQueuePageSize()));
         s.setLogsPageSize(normalizePageSize(patch.getLogsPageSize(), s.getLogsPageSize()));
 

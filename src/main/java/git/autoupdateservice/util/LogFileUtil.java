@@ -9,9 +9,6 @@ import java.nio.file.Path;
 public final class LogFileUtil {
     private LogFileUtil() {}
 
-    /**
-     * Очищает файл (создаёт директорию и делает размер 0), ошибки игнорирует.
-     */
     public static void truncateQuietly(Path file) {
         if (file == null) return;
         try {
@@ -20,9 +17,6 @@ public final class LogFileUtil {
         } catch (Exception ignored) {}
     }
 
-    /**
-     * Читает хвост файла (максимум maxChars символов), для отображения в веб-интерфейсе.
-     */
     public static String readTail(Path file, Charset charset, int maxChars) {
         if (file == null) return null;
         try {
@@ -30,12 +24,10 @@ public final class LogFileUtil {
             long size = Files.size(file);
             if (size <= 0) return "";
 
-            // Если файл небольшой — читаем целиком.
             if (size <= 256_000) {
                 return Files.readString(file, charset);
             }
 
-            // Иначе берём хвост (по байтам), потом режем по символам.
             int tailBytes = 256_000;
             long start = Math.max(0, size - tailBytes);
 
@@ -57,10 +49,6 @@ public final class LogFileUtil {
         }
     }
 
-    /**
-     * Читает файл целиком, но с ограничением по количеству символов (чтобы не раздувать базу).
-     * Если файл больше maxChars — сохраняем хвост (самые свежие строки обычно в конце).
-     */
     public static String readAllLimited(Path file, Charset charset, int maxChars) {
         if (file == null) return null;
         try {
