@@ -176,9 +176,11 @@ body {
 .queue-table td:nth-child(7),
 .queue-table td:nth-child(8) {
     text-align: center;
+    vertical-align: middle;
 }
 
 .queue-table .badge {
+    display: inline-flex;
     min-width: 96px;
     min-height: 32px;
     padding: 6px 8px;
@@ -190,7 +192,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 38px;
+    min-height: 32px;
 }
 
 .queue-action form {
