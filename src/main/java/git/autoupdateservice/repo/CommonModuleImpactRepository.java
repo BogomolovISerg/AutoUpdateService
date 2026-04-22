@@ -42,41 +42,23 @@ public interface CommonModuleImpactRepository extends JpaRepository<CommonModule
     );
 
     @Query(value = """
-            with distinct_modules as (
-                select distinct
-                    coalesce(nullif(btrim(c.source_kind), ''), 'BASE') as sourceKind,
-                    coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') as sourceName,
-                    c.common_module_name as commonModuleName
-                from common_module_impact c
-                where c.snapshot_id = :snapshotId
-                  and (:q = '' or lower(c.common_module_name) like :q)
-                  and (:objectType = '' or c.object_type = :objectType)
-            ),
-            page_modules as (
-                select *
-                from distinct_modules
-                order by commonModuleName,
-                         case when sourceKind = 'BASE' then 0 else 1 end,
-                         sourceName
-                limit :limit offset :offset
-            )
             select
-                m.sourceKind as sourceKind,
-                m.sourceName as sourceName,
-                m.commonModuleName as commonModuleName,
-                count(distinct c.common_module_member_name) as methodCount,
-                count(distinct (coalesce(c.object_type, '') || '|' || coalesce(c.object_name, ''))) as objectCount
-            from page_modules m
-            left join common_module_impact c
-              on c.snapshot_id = :snapshotId
-             and coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = m.sourceKind
-             and coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') = m.sourceName
-             and c.common_module_name = m.commonModuleName
-             and (:objectType = '' or c.object_type = :objectType)
-            group by m.sourceKind, m.sourceName, m.commonModuleName
-            order by m.commonModuleName,
-                     case when m.sourceKind = 'BASE' then 0 else 1 end,
-                     m.sourceName
+                coalesce(nullif(btrim(c.source_kind), ''), 'BASE') as sourceKind,
+                coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация') as sourceName,
+                c.common_module_name as commonModuleName,
+                cast(null as integer) as methodCount,
+                cast(null as integer) as objectCount
+            from common_module_impact c
+            where c.snapshot_id = :snapshotId
+              and (:q = '' or lower(c.common_module_name) like :q)
+              and (:objectType = '' or c.object_type = :objectType)
+            group by coalesce(nullif(btrim(c.source_kind), ''), 'BASE'),
+                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация'),
+                     c.common_module_name
+            order by c.common_module_name,
+                     case when coalesce(nullif(btrim(c.source_kind), ''), 'BASE') = 'BASE' then 0 else 1 end,
+                     coalesce(nullif(btrim(c.source_name), ''), 'Основная конфигурация')
+            limit :limit offset :offset
             """, nativeQuery = true)
     List<ModuleAggRow> findModuleNodes(
             @Param("snapshotId") UUID snapshotId,

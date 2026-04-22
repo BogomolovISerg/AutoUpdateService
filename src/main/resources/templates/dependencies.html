@@ -188,6 +188,7 @@
     let treeLimit = 100;
     let treeTotal = null;
     let treeHasMore = false;
+    let treeLoadSeq = 0;
 
     function esc(s) {
         return (s ?? '')
@@ -284,6 +285,7 @@
     }
 
     async function loadModules(reset) {
+        const loadSeq = ++treeLoadSeq;
         const root = document.getElementById('treeRoot');
         const status = document.getElementById('treeStatus');
         const f = currentFilters();
@@ -311,12 +313,14 @@
 
         let data;
         try {
-            data = await fetchJsonWithTimeout('/dependencies/tree/modules?' + params.toString(), 60000);
+            data = await fetchJsonWithTimeout('/dependencies/tree/modules?' + params.toString(), 180000);
         } catch (e) {
+            if (loadSeq !== treeLoadSeq) return;
             status.textContent = 'Ошибка загрузки модулей. Запрос выполнялся слишком долго или завершился ошибкой.';
             updateMoreButton();
             return;
         }
+        if (loadSeq !== treeLoadSeq) return;
 
         if (reset && data.length === 0) {
             treeTotal = 0;
@@ -335,6 +339,9 @@
 
         for (const item of data) {
             const moduleId = 'module_' + btoa(unescape(encodeURIComponent(item.commonModuleName))).replaceAll('=', '');
+            const counts = item.methodCount == null || item.objectCount == null
+                ? '<span class="small">(раскройте для списка методов)</span>'
+                : `<span class="small">(${item.methodCount} методов, ${item.objectCount} объектов)</span>`;
             const html = `
                 <details class="tree-module" style="margin-bottom:8px; border:1px solid #ddd; border-radius:8px; padding:8px;"
                          data-module-name="${esc(item.commonModuleName)}"
@@ -344,7 +351,7 @@
                     <summary style="cursor:pointer;">
                         <b>${esc(item.commonModuleName)}</b>
                         ${item.sourceKind === 'EXTENSION' ? `<span class="small">[${esc(item.sourceName)}]</span>` : ''}
-                        <span class="small">(${item.methodCount ?? 0} методов, ${item.objectCount ?? 0} объектов)</span>
+                        ${counts}
                     </summary>
                     <div id="${moduleId}" class="module-children" style="padding-left:16px; margin-top:8px;"></div>
                 </details>
