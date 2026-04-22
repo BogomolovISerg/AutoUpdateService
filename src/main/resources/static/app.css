@@ -145,23 +145,65 @@ body {
 }
 
 /* Фиксы ширин по ключевым таблицам */
-.queue-table th:nth-child(1), .queue-table td:nth-child(1) { min-width: 150px; } /* created_at */
-.queue-table th:nth-child(2), .queue-table td:nth-child(2) { min-width: 220px; } /* project */
-.queue-table th:nth-child(3), .queue-table td:nth-child(3) { min-width: 90px; }  /* type */
-.queue-table th:nth-child(4), .queue-table td:nth-child(4) { min-width: 220px; } /* ext */
-.queue-table th:nth-child(5), .queue-table td:nth-child(5) { min-width: 150px; } /* author */
-.queue-table th:nth-child(6), .queue-table td:nth-child(6) { min-width: 560px; } /* comment */
-.queue-table th:nth-child(7), .queue-table td:nth-child(7) { min-width: 110px; } /* status */
-.queue-table th:nth-child(8), .queue-table td:nth-child(8) { min-width: 150px; } /* action */
+.queue-table {
+    table-layout: fixed;
+}
+
+.queue-table th,
+.queue-table td {
+    padding: 7px 6px;
+    font-size: 13px;
+}
+
+.queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: 138px; } /* created_at */
+.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 15%; }   /* project */
+.queue-table th:nth-child(3), .queue-table td:nth-child(3) { width: 72px; }   /* type */
+.queue-table th:nth-child(4), .queue-table td:nth-child(4) { width: 14%; }   /* ext */
+.queue-table th:nth-child(5), .queue-table td:nth-child(5) { width: 120px; } /* author */
+.queue-table th:nth-child(6), .queue-table td:nth-child(6) { width: auto; }  /* comment */
+.queue-table th:nth-child(7), .queue-table td:nth-child(7) { width: 112px; } /* status */
+.queue-table th:nth-child(8), .queue-table td:nth-child(8) { width: 112px; } /* action */
+
+.queue-table td:nth-child(2),
+.queue-table td:nth-child(4),
+.queue-table td:nth-child(5) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.queue-table td:nth-child(3),
+.queue-table td:nth-child(7),
+.queue-table td:nth-child(8) {
+    text-align: center;
+}
+
+.queue-table .badge {
+    min-width: 96px;
+    min-height: 32px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+}
 
 .queue-action {
     display: flex;
     align-items: center;
+    justify-content: center;
     min-height: 38px;
 }
 
 .queue-action form {
     margin: 0;
+    width: 100%;
+}
+
+.queue-action .btn {
+    width: 96px;
+    min-height: 32px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    font-size: 12px;
 }
 
 .logs-table th:nth-child(1), .logs-table td:nth-child(1) { min-width: 210px; } /* ts */
