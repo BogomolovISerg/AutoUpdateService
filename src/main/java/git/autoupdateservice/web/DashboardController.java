@@ -2,6 +2,7 @@ package git.autoupdateservice.web;
 
 import git.autoupdateservice.repo.ExecutionRunRepository;
 import git.autoupdateservice.repo.UpdateTaskRepository;
+import git.autoupdateservice.service.AllureReportService;
 import git.autoupdateservice.service.SettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -24,6 +25,7 @@ public class DashboardController {
     private final SettingsService settingsService;
     private final UpdateTaskRepository updateTaskRepository;
     private final ExecutionRunRepository executionRunRepository;
+    private final AllureReportService allureReportService;
 
     @GetMapping("/")
     public String dashboard(Model model, Authentication auth) {
@@ -42,6 +44,7 @@ public class DashboardController {
 
         Map<UUID, String> plannedForFmt = new HashMap<>();
         Map<UUID, String> dependencySnapshotFmt = new HashMap<>();
+        Map<UUID, Boolean> allureAvailable = new HashMap<>();
         Map<String, String> createdAtFmt = new HashMap<>();
         for (var r : recentRuns) {
             if (r.getId() != null && r.getPlannedFor() != null) {
@@ -52,6 +55,9 @@ public class DashboardController {
             }
             if (r.getId() != null && r.getDependencySnapshot() != null && r.getDependencySnapshot().getId() != null) {
                 dependencySnapshotFmt.put(r.getId(), String.valueOf(r.getDependencySnapshot().getId()));
+            }
+            if (r.getId() != null && r.getStage() == git.autoupdateservice.domain.RunStage.TEST) {
+                allureAvailable.put(r.getId(), allureReportService.hasReport(r.getId()));
             }
         }
         for (var t : recentNewTasks) {
@@ -66,6 +72,7 @@ public class DashboardController {
         model.addAttribute("recentRuns", recentRuns);
         model.addAttribute("plannedForFmt", plannedForFmt);
         model.addAttribute("dependencySnapshotFmt", dependencySnapshotFmt);
+        model.addAttribute("allureAvailable", allureAvailable);
         model.addAttribute("createdAtFmt", createdAtFmt);
         model.addAttribute("actor", auth != null ? auth.getName() : "anonymous");
         return "dashboard";

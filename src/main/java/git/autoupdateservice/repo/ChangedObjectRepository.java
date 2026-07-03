@@ -6,6 +6,7 @@ import git.autoupdateservice.domain.DependencyCallerType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -20,4 +21,5 @@ public interface ChangedObjectRepository extends JpaRepository<ChangedObject, UU
     );
 
     List<ChangedObject> findByStatusIn(Collection<ChangedObjectStatus> statuses);
+    long deleteByStatusInAndLastDetectedAtBefore(Collection<ChangedObjectStatus> statuses, OffsetDateTime cutoff);
 }

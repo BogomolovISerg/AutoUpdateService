@@ -87,7 +87,7 @@ public class RunStepCommandService {
         context.put("ib-connectionrepo", nvl(ibConnectionRepo));
         context.put("ib-connection-repo", nvl(ibConnectionRepo));
 
-        String resolvedExt = firstNonBlank(ext, resolveSetting(planSettings, null, "ext"));
+        String resolvedExt = firstNonBlank(ext, resolveSetting(planSettings, runnerProperties.ext(), "ext"));
         String resolvedExtFile = firstNonBlank(extFile, resolveSetting(planSettings, resolvedExt, "extFile", "ext-file"));
 
         context.put("needMain", String.valueOf(needMain));

@@ -16,17 +16,17 @@ public record RunnerProperties(
         String logDir,
         String windowsCodePage,
         String stepsFile,
+        String display,
+        String xauthority,
+        Boolean linuxGuiEnvironmentEnabled,
 
-        // Optional overrides / fallbacks (may be set via application.properties / env)
         String lockMessage,
         String uccode,
         String mainRepoPath,
         String extRepoPath,
+        String ext,
 
-        // Some installations prefer a different 1C connection format for repo operations (e.g. /S...).
-        // Bindable from runner.ib-connectionrepo / runner.ib-connection-repo / RUNNER_CONNECTIONREPO, etc.
         String ibConnectionrepo,
-        int keepDays,
         String testPlanFile,
         String productionPlanFile
 ) {}

@@ -4,15 +4,19 @@ import git.autoupdateservice.domain.*;
 import git.autoupdateservice.repo.ChangedObjectRepository;
 import git.autoupdateservice.repo.CommonModuleImpactRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +25,7 @@ public class ChangedObjectService {
     private final ChangedObjectRepository changedObjectRepository;
     private final CommonModuleImpactRepository commonModuleImpactRepository;
     private final AuditLogService auditLogService;
+    private final JdbcTemplate jdbcTemplate;
 
     @Transactional
     public int registerDirectObjects(
@@ -38,23 +43,20 @@ public class ChangedObjectService {
             if (hit == null || hit.objectType() == null || isBlank(hit.objectName())) {
                 continue;
             }
-            ChangedObject row = changedObjectRepository
-                    .findFirstByBusinessDateAndObjectTypeAndObjectName(task.getScheduledFor(), hit.objectType(), hit.objectName())
-                    .orElseGet(ChangedObject::new);
-
-            boolean fresh = row.getId() == null;
-            if (fresh) {
-                row.setBusinessDate(task.getScheduledFor());
-                row.setObjectType(hit.objectType());
-                row.setObjectName(hit.objectName());
-                row.setFirstDetectedAt(now);
+            String objectName = hit.objectName().trim();
+            if (isExcludedFromTesting(objectName)) {
+                continue;
             }
-            row.setProjectPath(task.getProjectPath());
-            row.setChangedPath(hit.changedPath());
-            row.setDirectChangeDetected(true);
-            row.setLastDetectedAt(now);
-            row.setStatus(ChangedObjectStatus.NEW);
-            changedObjectRepository.save(row);
+            upsertChangedObject(
+                    task.getScheduledFor(),
+                    hit.objectType(),
+                    objectName,
+                    task.getProjectPath(),
+                    hit.changedPath(),
+                    true,
+                    false,
+                    now
+            );
             affected++;
         }
 
@@ -72,16 +74,17 @@ public class ChangedObjectService {
     }
 
     @Transactional
-    public void registerObjectsFromDirtyModules(
+    public int registerObjectsFromDirtyModules(
             DependencySnapshot snapshot,
             Collection<DependencyGraphDirtyItem> dirtyItems,
             String clientIp
     ) {
         if (snapshot == null || dirtyItems == null || dirtyItems.isEmpty()) {
-            return;
+            return 0;
         }
 
         Set<DependencyGraphDirtyItem> uniqueItems = new LinkedHashSet<>(dirtyItems);
+        Set<String> processedObjects = new LinkedHashSet<>();
         int affectedObjects = 0;
         for (DependencyGraphDirtyItem dirtyItem : uniqueItems) {
             if (dirtyItem == null || dirtyItem.getSourceKind() == null || isBlank(dirtyItem.getSourceName()) || isBlank(dirtyItem.getModuleName())) {
@@ -107,32 +110,24 @@ public class ChangedObjectService {
                     continue;
                 }
                 String objectName = impact.getObjectName().trim();
-                String dedupKey = impact.getObjectType().name() + "|" + objectName;
-                if (!dedup.add(dedupKey)) {
+                if (isExcludedFromTesting(objectName)) {
                     continue;
                 }
-
-                ChangedObject row = changedObjectRepository
-                        .findFirstByBusinessDateAndObjectTypeAndObjectName(
-                                dirtyItem.getBusinessDate(),
-                                impact.getObjectType(),
-                                objectName
-                        )
-                        .orElseGet(ChangedObject::new);
-
-                boolean fresh = row.getId() == null;
-                if (fresh) {
-                    row.setBusinessDate(dirtyItem.getBusinessDate());
-                    row.setObjectType(impact.getObjectType());
-                    row.setObjectName(objectName);
-                    row.setFirstDetectedAt(now);
+                String dedupKey = impact.getObjectType().name() + "|" + objectName;
+                String batchKey = dirtyItem.getBusinessDate() + "|" + dedupKey.toLowerCase(Locale.ROOT);
+                if (!dedup.add(dedupKey) || !processedObjects.add(batchKey)) {
+                    continue;
                 }
-                row.setProjectPath(firstNonBlank(row.getProjectPath(), dirtyItem.getSourceName()));
-                row.setChangedPath(dirtyItem.getChangedPath());
-                row.setGraphImpactDetected(true);
-                row.setLastDetectedAt(now);
-                row.setStatus(ChangedObjectStatus.NEW);
-                changedObjectRepository.save(row);
+                upsertChangedObject(
+                        dirtyItem.getBusinessDate(),
+                        impact.getObjectType(),
+                        objectName,
+                        dirtyItem.getSourceName(),
+                        dirtyItem.getChangedPath(),
+                        false,
+                        true,
+                        now
+                );
                 affectedObjects++;
             }
         }
@@ -147,16 +142,76 @@ public class ChangedObjectService {
                     null
             );
         }
+        return affectedObjects;
+    }
+
+    private void upsertChangedObject(
+            LocalDate businessDate,
+            DependencyCallerType objectType,
+            String objectName,
+            String projectPath,
+            String changedPath,
+            boolean directChangeDetected,
+            boolean graphImpactDetected,
+            OffsetDateTime detectedAt
+    ) {
+        jdbcTemplate.update(
+                """
+                insert into public.changed_object (
+                    id,
+                    business_date,
+                    object_type,
+                    object_name,
+                    project_path,
+                    changed_path,
+                    direct_change_detected,
+                    graph_impact_detected,
+                    first_detected_at,
+                    last_detected_at,
+                    status
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict (business_date, object_type, object_name)
+                do update set
+                    project_path = case
+                        when excluded.direct_change_detected then excluded.project_path
+                        when changed_object.project_path is null or btrim(changed_object.project_path) = '' then excluded.project_path
+                        else changed_object.project_path
+                    end,
+                    changed_path = excluded.changed_path,
+                    direct_change_detected = changed_object.direct_change_detected or excluded.direct_change_detected,
+                    graph_impact_detected = changed_object.graph_impact_detected or excluded.graph_impact_detected,
+                    last_detected_at = excluded.last_detected_at,
+                    status = excluded.status
+                """,
+                UUID.randomUUID(),
+                businessDate,
+                objectType.name(),
+                objectName,
+                trimToNull(projectPath),
+                trimToNull(changedPath),
+                directChangeDetected,
+                graphImpactDetected,
+                detectedAt,
+                detectedAt,
+                ChangedObjectStatus.NEW.name()
+        );
     }
 
     @Transactional(readOnly = true)
     public List<ChangedObject> findForTesting() {
-        return changedObjectRepository.findByStatusIn(EnumSet.of(ChangedObjectStatus.NEW, ChangedObjectStatus.TEST_FAILED));
+        return changedObjectRepository.findByStatusIn(EnumSet.of(ChangedObjectStatus.NEW, ChangedObjectStatus.TEST_FAILED))
+                .stream()
+                .filter(row -> row != null && !isExcludedFromTesting(row.getObjectName()))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<ChangedObject> findForProduction() {
-        return changedObjectRepository.findByStatusIn(EnumSet.of(ChangedObjectStatus.TEST_OK));
+        return changedObjectRepository.findByStatusIn(EnumSet.of(ChangedObjectStatus.TEST_OK))
+                .stream()
+                .filter(row -> row != null && !isExcludedFromTesting(row.getObjectName()))
+                .toList();
     }
 
     @Transactional
@@ -187,6 +242,21 @@ public class ChangedObjectService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static boolean isExcludedFromTesting(String objectName) {
+        if (isBlank(objectName)) {
+            return false;
+        }
+        String normalized = objectName.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("уат") || normalized.startsWith("uat");
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private static String firstNonBlank(String first, String second) {

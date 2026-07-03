@@ -1,4 +1,4 @@
-
+/* базовый reset для предсказуемой вёрстки */
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
@@ -57,28 +57,30 @@ body {
 .col-6 { grid-column: span 6; }
 .col-12 { grid-column: span 12; }
 
-.dashboard-top {
-    display: flex;
+/* ---------------------------------------------------------
+   DASHBOARD
+   --------------------------------------------------------- */
+.dashboard-summary-line {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(190px, 1fr) minmax(190px, 1fr) minmax(160px, 0.8fr) auto;
     gap: 12px;
-    align-items: flex-start;
-    margin: 14px 0;
+    align-items: center;
 }
 
-.dashboard-top > .card {
+.dashboard-summary-line h3,
+.dashboard-summary-line p {
     margin: 0;
-    width: calc(50% - 6px);
-    min-width: 0;
 }
 
-.dashboard-summary-card,
-.dashboard-runs-card {
-    min-width: 0;
+.dashboard-summary-line .btn {
+    justify-self: end;
+    white-space: nowrap;
 }
 
 .dashboard-runs-card {
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .dashboard-runs-card h3 {
@@ -89,32 +91,56 @@ body {
 .dashboard-runs-wrap {
     flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    max-height: 420px;
+    overflow: auto;
     scrollbar-gutter: stable;
 }
 
 .dashboard-runs-table {
     width: 100%;
+    min-width: 1120px;
     table-layout: fixed;
 }
 
 .dashboard-runs-table th:nth-child(1),
 .dashboard-runs-table td:nth-child(1) {
-    width: 180px;
-    min-width: 180px;
+    width: 170px;
 }
 
 .dashboard-runs-table th:nth-child(2),
 .dashboard-runs-table td:nth-child(2) {
-    width: 120px;
-    min-width: 120px;
+    width: 110px;
 }
 
 .dashboard-runs-table th:nth-child(3),
 .dashboard-runs-table td:nth-child(3) {
+    width: 130px;
+}
+
+.dashboard-runs-table th:nth-child(4),
+.dashboard-runs-table td:nth-child(4) {
+    width: 150px;
+}
+
+.dashboard-runs-table th:nth-child(5),
+.dashboard-runs-table td:nth-child(5) {
     width: auto;
     min-width: 0;
+}
+
+.dashboard-runs-table th:nth-child(6),
+.dashboard-runs-table td:nth-child(6) {
+    width: 96px;
+}
+
+.dashboard-runs-table td:nth-child(6) {
+    white-space: normal;
+}
+
+.dashboard-runs-table .btn {
+    min-height: 32px;
+    padding: 6px 8px;
+    font-size: 12px;
 }
 
 .dashboard-runs-table td.wrap {
@@ -123,6 +149,12 @@ body {
     word-break: break-word;
 }
 
+.dashboard-runs-table th,
+.dashboard-runs-table td {
+    overflow-wrap: anywhere;
+}
+
+/* Таблицы */
 .table-wrap { width: 100%; overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {
@@ -134,11 +166,13 @@ body {
 }
 .table th { font-weight: 700; color: #111827; }
 
+/* Разрешаем переносы только там, где нужно (message/comment и т.п.) */
 .table td.wrap {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
+/* Фиксы ширин по ключевым таблицам */
 .queue-table {
     table-layout: fixed;
 }
@@ -213,22 +247,27 @@ body {
 .logs-table th:nth-child(5), .logs-table td:nth-child(5) { min-width: 150px; } /* ip */
 .logs-table th:nth-child(6), .logs-table td:nth-child(6) { min-width: 520px; } /* message */
 
+/* ---------------------------------------------------------
+   ЛОГИ: компактные строки + одинаковое выравнивание по высоте
+   (важно: перебиваем общий .table td { white-space: nowrap; })
+   --------------------------------------------------------- */
 .logs-table th,
 .logs-table td {
     padding: 4px 8px;
     line-height: 1.2;
     vertical-align: top;
-    white-space: normal;
+    white-space: normal; /* критично: убираем nowrap для логов */
 }
 
 .logs-table td.wrap {
-    white-space: pre-wrap;
+    white-space: pre-wrap; /* переносы + сохранение \n */
     overflow-wrap: anywhere;
 }
 
 .logs-table td.wrap > div { margin: 0; }
 .logs-table td.wrap .small { margin-top: 2px; line-height: 1.2; }
 
+/* Пагинация */
 .pager {
     display: flex;
     gap: 10px;
@@ -236,6 +275,7 @@ body {
     flex-wrap: wrap;
 }
 
+/* Статусы */
 .badge {
     display: inline-flex;
     align-items: center;
@@ -251,6 +291,7 @@ body {
 .badge.CANCELED { background: #fee2e2; }
 .badge.UPDATED { background: #dcfce7; }
 
+/* Кнопки */
 .btn {
     border: 0;
     border-radius: 10px;
@@ -273,6 +314,7 @@ body {
 .btn.secondary { background: #6b7280; }
 .btn.danger { background: #b91c1c; }
 
+/* Поля ввода */
 .input {
     width: 100%;
     padding: 8px 10px;
@@ -283,6 +325,7 @@ body {
 
 .small { color: #6b7280; font-size: 12px; }
 
+/* Просмотр больших логов */
 .log-pre {
     margin: 0;
     padding: 12px;
@@ -298,10 +341,12 @@ body {
     line-height: 1.4;
 }
 
+/* Горизонтальные формы (фильтры) */
 .row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
 .row > div:not(.row-actions) { display:flex; flex-direction:column; gap:6px; min-width: 210px; flex: 1 1 240px; }
 .row-actions { display:flex; gap:10px; align-items:flex-end; margin-left:auto; flex: 0 0 auto; }
 
+/* Сетка настроек */
 .settings-grid > div {
     display: flex;
     flex-direction: column;
@@ -309,23 +354,26 @@ body {
 }
 .settings-grid label { margin-top: 0; }
 
+/* Формы в карточках */
 .card label { display:block; margin-top: 12px; font-weight: 600; }
 .card label.small { font-weight: 500; margin-top: 0; }
 .card input[type="checkbox"] { margin-right: 6px; }
 
 hr { border: 0; border-top: 1px solid #e5e7eb; margin: 12px 0; }
 
+/* Адаптив */
 @media (max-width: 900px) {
     .col-6 { grid-column: span 12; }
     .row > div:not(.row-actions) { min-width: 160px; flex: 1 1 200px; }
     .row-actions { margin-left: 0; width: 100%; justify-content: flex-start; }
 
-    .dashboard-top {
-        flex-direction: column;
+    .dashboard-summary-line {
+        grid-template-columns: 1fr;
+        align-items: start;
     }
 
-    .dashboard-top > .card {
-        width: 100%;
+    .dashboard-summary-line .btn {
+        justify-self: start;
     }
 
     .dashboard-runs-card {
@@ -335,7 +383,7 @@ hr { border: 0; border-top: 1px solid #e5e7eb; margin: 12px 0; }
     .dashboard-runs-wrap {
         height: auto !important;
         max-height: none !important;
-        overflow-y: visible;
+        overflow: auto;
     }
 }
 

@@ -25,6 +25,8 @@
         <p class="small">Если выключить автообновление при наличии новых задач появится подтверждение.</p>
         <form method="post" th:action="@{/settings}" th:object="${form}">
             <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+            <input type="hidden" th:field="*{lockMessage}"/>
+            <input type="hidden" th:field="*{uccode}"/>
 
             <div class="grid settings-grid">
                 <div class="col-12">
@@ -34,6 +36,15 @@
                 <div class="col-12">
                     <label><input type="checkbox" th:field="*{dependencyGraphRebuildEnabled}"/> Пересчет графа зависимостей включен</label>
                     <p class="small">Если выключить, при устаревшем графе TEST-прогон будет продолжен по текущему snapshot без ожидания пересчета.</p>
+                </div>
+                <div class="col-12">
+                    <label>Ожидание пересчета графа перед TEST, минут</label>
+                    <input class="input" type="number" min="1" max="1440" th:field="*{dependencyGraphRebuildWaitMinutes}"/>
+                    <div class="small">Если граф не пересчитался за это время, TEST продолжится по текущему snapshot.</div>
+                </div>
+                <div class="col-12">
+                    <label><input type="checkbox" th:field="*{ignoreTestResults}"/> Игнорировать результаты тестирования</label>
+                    <p class="small">Если включено, статус smoke-тестирования принудительно считается успешным, и PROD не блокируется результатом тестов.</p>
                 </div>
 
                 <div class="col-6">
@@ -52,6 +63,23 @@
                 <div class="col-6">
                     <label>Время запуска рабочей базы</label>
                     <input class="input" type="time" th:field="*{productionRunTime}"/>
+                </div>
+
+                <div class="col-12" style="margin-top:8px;">
+                    <label><input type="checkbox" th:field="*{cleanupEnabled}"/> Автоочистка включена</label>
+                </div>
+                <div class="col-6">
+                    <label>Дата ближайшего запуска очистки</label>
+                    <input class="input" type="date" th:field="*{nextCleanupRunDate}"/>
+                </div>
+                <div class="col-6">
+                    <label>Время запуска очистки</label>
+                    <input class="input" type="time" th:field="*{cleanupRunTime}"/>
+                </div>
+                <div class="col-6">
+                    <label>Хранить данные, дней</label>
+                    <input class="input" type="number" min="1" max="3650" th:field="*{cleanupKeepDays}"/>
+                    <div class="small">Используется для очистки БД и каталога runner-logs</div>
                 </div>
 
                 <div class="col-6">

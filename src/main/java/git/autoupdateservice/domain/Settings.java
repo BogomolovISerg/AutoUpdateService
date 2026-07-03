@@ -18,9 +18,6 @@ public class Settings {
     @Column(name = "auto_update_enabled", nullable = false)
     private boolean autoUpdateEnabled = true;
 
-    @Column(name = "dependency_graph_rebuild_enabled", nullable = false)
-    private boolean dependencyGraphRebuildEnabled = true;
-
     @Column(name = "test_run_time", nullable = false)
     private LocalTime testRunTime = LocalTime.of(2, 0);
 
@@ -32,6 +29,27 @@ public class Settings {
 
     @Column(name = "next_production_run_date")
     private LocalDate nextProductionRunDate;
+
+    @Column(name = "dependency_graph_rebuild_enabled", nullable = false)
+    private boolean dependencyGraphRebuildEnabled = true;
+
+    @Column(name = "dependency_graph_rebuild_wait_minutes", nullable = false)
+    private int dependencyGraphRebuildWaitMinutes = 60;
+
+    @Column(name = "ignore_test_results", nullable = false)
+    private boolean ignoreTestResults = false;
+
+    @Column(name = "cleanup_enabled", nullable = false)
+    private boolean cleanupEnabled = true;
+
+    @Column(name = "cleanup_run_time", nullable = false)
+    private LocalTime cleanupRunTime = LocalTime.of(1, 0);
+
+    @Column(name = "next_cleanup_run_date")
+    private LocalDate nextCleanupRunDate;
+
+    @Column(name = "cleanup_keep_days", nullable = false)
+    private int cleanupKeepDays = 30;
 
     @Column(name = "timezone", nullable = false, length = 60)
     private String timezone = "Europe/Zurich";
@@ -48,6 +66,7 @@ public class Settings {
     @Column(name = "closed_sleep_seconds", nullable = false)
     private int closedSleepSeconds = 15;
 
+    // UI pagination
     @Column(name = "queue_page_size", nullable = false)
     private int queuePageSize = 50;
 

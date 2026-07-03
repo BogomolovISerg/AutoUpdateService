@@ -20,39 +20,46 @@ public class RunnerLogsCleanupService {
 
     private final RunnerProperties runnerProperties;
 
-    public void cleanupOldRuns() {
-        int keepDays = runnerProperties.keepDays();
+    public CleanupResult cleanupOldRuns(int keepDays) {
         if (keepDays <= 0) {
             log.info("Runner logs cleanup disabled, keepDays={}", keepDays);
-            return;
+            return new CleanupResult(0);
         }
 
         Path root = Path.of(runnerProperties.logDir()).toAbsolutePath().normalize();
         if (!Files.exists(root) || !Files.isDirectory(root)) {
-            return;
+            return new CleanupResult(0);
         }
 
         Instant cutoff = Instant.now().minus(keepDays, ChronoUnit.DAYS);
+        int[] deleted = {0};
 
         try (Stream<Path> stream = Files.list(root)) {
             stream.filter(Files::isDirectory)
                     .filter(p -> p.getFileName().toString().startsWith("run-"))
-                    .forEach(dir -> tryDeleteIfOld(dir, cutoff));
+                    .forEach(dir -> {
+                        if (tryDeleteIfOld(dir, cutoff)) {
+                            deleted[0]++;
+                        }
+                    });
         } catch (Exception e) {
             log.warn("Failed to scan runner logs directory {}: {}", root, e.getMessage(), e);
         }
+        return new CleanupResult(deleted[0]);
     }
 
-    private void tryDeleteIfOld(Path dir, Instant cutoff) {
+    private boolean tryDeleteIfOld(Path dir, Instant cutoff) {
         try {
             FileTime lastModified = Files.getLastModifiedTime(dir);
             if (lastModified.toInstant().isBefore(cutoff)) {
                 deleteRecursively(dir);
                 log.info("Deleted old runner log directory: {}", dir);
+                return true;
             }
         } catch (Exception e) {
             log.warn("Failed to delete old runner log directory {}: {}", dir, e.getMessage(), e);
         }
+        return false;
     }
 
     private void deleteRecursively(Path dir) throws IOException {
@@ -71,5 +78,8 @@ public class RunnerLogsCleanupService {
             }
             throw e;
         }
+    }
+
+    public record CleanupResult(int deletedDirectories) {
     }
 }

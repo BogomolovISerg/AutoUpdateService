@@ -9,6 +9,7 @@ import git.autoupdateservice.domain.RunStage;
 import git.autoupdateservice.service.steps.RunPlan;
 import git.autoupdateservice.service.steps.RunStepCommandService;
 import git.autoupdateservice.service.steps.StepPlanLoader;
+import git.autoupdateservice.util.JsonPrettyPrinters;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -84,13 +85,14 @@ public class SmokeObjectListService {
             return new StoreResult(false, true, "Пустой или некорректный JSON", file, Map.of());
         }
 
-        JsonNode errors = payload.path("Ошибки");
+        JsonNode errors = errorSection(payload);
         boolean hasError = errors.path("ЕстьОшибка").asBoolean(false);
         String errorText = errors.path("ТекстОшибка").asText("");
+        logExternalObjectListErrorFields(hasError, errorText, file, clientIp, actor);
         if (hasError) {
-            auditLogService.warn(
+            auditLogService.error(
                     LogType.STEP_FAILED,
-                    "External object list contains error: " + safe(errorText),
+                    "External object list rejected",
                     "{\"path\":\"" + esc(file.toString()) + "\",\"saved\":false}",
                     clientIp,
                     actor,
@@ -102,7 +104,7 @@ public class SmokeObjectListService {
         if (file.getParent() != null) {
             Files.createDirectories(file.getParent());
         }
-        objectMapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), payload);
+        objectMapper.writer(JsonPrettyPrinters.multilineArrays()).writeValue(file.toFile(), payload);
 
         Map<DependencyCallerType, Set<String>> parsed = parseObjects(payload);
         auditLogService.info(
@@ -148,10 +150,15 @@ public class SmokeObjectListService {
         }
 
         JsonNode payload = objectMapper.readTree(Files.readString(file, StandardCharsets.UTF_8));
-        if (payload.path("Ошибки").path("ЕстьОшибка").asBoolean(false)) {
+        JsonNode errors = errorSection(payload);
+        if (errors.path("ЕстьОшибка").asBoolean(false)) {
+            String errorText = errors.path("ТекстОшибка").asText("");
             auditLogService.warn(
                     LogType.STEP_FAILED,
-                    "External object list file contains error flag. Smoke config will be generated with default masks only.",
+                    appendErrorTextLines(
+                            "External object list file contains error flag. Smoke config will be generated with default masks only.",
+                            errorText
+                    ),
                     "{\"path\":\"" + esc(file.toString()) + "\"}",
                     null,
                     "system",
@@ -160,6 +167,61 @@ public class SmokeObjectListService {
             return new LinkedHashMap<>();
         }
         return parseObjects(payload);
+    }
+
+    private JsonNode errorSection(JsonNode payload) {
+        if (payload == null || payload.isMissingNode() || payload.isNull()) {
+            return objectMapper.createObjectNode();
+        }
+        JsonNode nested = payload.path("Ошибки");
+        if (nested != null && nested.isObject()) {
+            return nested;
+        }
+        return payload;
+    }
+
+    private void logExternalObjectListErrorFields(
+            boolean hasError,
+            String errorText,
+            Path file,
+            String clientIp,
+            String actor
+    ) {
+        String message = appendErrorTextLines("External object list received", errorText);
+        String data = "{\"path\":\"" + esc(file == null ? "" : file.toString()) + "\"}";
+        if (hasError) {
+            auditLogService.error(LogType.STEP_FAILED, message, data, clientIp, actor, null);
+        } else {
+            auditLogService.info(LogType.STEP_FINISHED, message, data, clientIp, actor, null);
+        }
+    }
+
+    private static String appendErrorTextLines(String message, String errorText) {
+        String lines = formatErrorTextLines(errorText);
+        if (!StringUtils.hasText(lines)) {
+            return message;
+        }
+        return message + "\n" + lines;
+    }
+
+    private static String formatErrorTextLines(String errorText) {
+        if (!StringUtils.hasText(errorText)) {
+            return "";
+        }
+
+        StringBuilder result = new StringBuilder();
+        String[] parts = errorText.split(",");
+        for (String part : parts) {
+            String line = safe(part).trim();
+            if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            if (!result.isEmpty()) {
+                result.append('\n');
+            }
+            result.append(line);
+        }
+        return result.toString();
     }
 
     public Path resolveStorageFile(RunPlan plan) {

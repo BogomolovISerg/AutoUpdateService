@@ -20,7 +20,6 @@ public class NightlyScheduler {
 
     private final SettingsRepository settingsRepository;
     private final UpdateExecutor updateExecutor;
-    private final Instant schedulerStartedAt = Instant.now();
 
     @Scheduled(cron = "${app.scheduler.poll-cron}")
     public void tick() {
@@ -42,15 +41,7 @@ public class NightlyScheduler {
             log.warn("Invalid scheduler timezone '{}', using system timezone {}", s.getTimezone(), zone);
         }
 
-        ScheduleResult testResult = tryScheduleStage(s, zone, RunStage.TEST);
-        if (testResult.due() && !testResult.success()) {
-            log.warn("Scheduled PRODUCTION run skipped because due TEST run did not finish successfully. testStatus={}", testResult.status());
-            if (testResult.shouldShiftProduction()) {
-                Settings refreshed = settingsRepository.findById(1L).orElse(s);
-                shiftProductionAfterBlockedTest(refreshed, zone);
-            }
-            return;
-        }
+        tryScheduleStage(s, zone, RunStage.TEST);
 
         Settings refreshed = settingsRepository.findById(1L).orElse(s);
         tryScheduleStage(refreshed, zone, RunStage.PRODUCTION);
@@ -70,7 +61,7 @@ public class NightlyScheduler {
         if (next == null) {
             next = LocalDate.now(zone);
             setNextDate(settings, stage, next);
-            settingsRepository.save(settings);
+            updateNextDate(stage, next);
         }
 
         OffsetDateTime plannedFor = ZonedDateTime.of(next, runTime(settings, stage), zone).toOffsetDateTime();
@@ -79,19 +70,15 @@ public class NightlyScheduler {
             log.debug("Scheduled {} run is not due yet. now={}, plannedFor={}", stage, now, plannedFor);
             return ScheduleResult.notDue();
         }
-        if (plannedFor.toInstant().isBefore(schedulerStartedAt)) {
-            shiftNextDate(settings, stage, next);
-            log.warn(
-                    "Scheduled {} run skipped because planned time is before application startup. plannedFor={}, schedulerStartedAt={}. Next date shifted to {}",
-                    stage,
-                    plannedFor,
-                    schedulerStartedAt,
-                    next.plusDays(1)
-            );
-            return ScheduleResult.skippedCatchUp();
-        }
-
-        log.info("Scheduled {} run is due. now={}, plannedFor={}", stage, now, plannedFor);
+        log.info(
+                "Scheduled {} run is due. now={}, plannedFor={}, nextDate={}, runTime={}, settingsUpdatedAt={}",
+                stage,
+                now,
+                plannedFor,
+                next,
+                runTime(settings, stage),
+                settings.getUpdatedAt()
+        );
         Optional<ExecutionRun> result = updateExecutor.runScheduled(stage, plannedFor);
         if (result.isEmpty()) {
             log.info("Scheduled {} run was not started. The advisory lock is busy. plannedFor={}", stage, plannedFor);
@@ -132,52 +119,39 @@ public class NightlyScheduler {
     }
 
     private void shiftNextDate(Settings settings, RunStage stage, LocalDate currentDate) {
-        setNextDate(settings, stage, currentDate.plusDays(1));
-        settings.setUpdatedAt(OffsetDateTime.now());
-        settingsRepository.save(settings);
+        LocalDate shifted = currentDate.plusDays(1);
+        setNextDate(settings, stage, shifted);
+        updateNextDate(stage, shifted);
     }
 
-    private void shiftProductionAfterBlockedTest(Settings settings, ZoneId zone) {
-        LocalDate today = LocalDate.now(zone);
-        LocalDate productionDate = settings.getNextProductionRunDate();
-        if (productionDate == null) {
-            productionDate = today;
+    private void updateNextDate(RunStage stage, LocalDate value) {
+        OffsetDateTime updatedAt = OffsetDateTime.now();
+        if (stage == RunStage.TEST) {
+            settingsRepository.updateNextTestRunDate(1L, value, updatedAt);
+        } else {
+            settingsRepository.updateNextProductionRunDate(1L, value, updatedAt);
         }
-
-        if (productionDate.isAfter(today)) {
-            return;
-        }
-
-        LocalDate shifted = today.plusDays(1);
-        settings.setNextProductionRunDate(shifted);
-        settings.setUpdatedAt(OffsetDateTime.now());
-        settingsRepository.save(settings);
-        log.warn("Scheduled PRODUCTION date shifted to {} because TEST did not complete successfully", shifted);
     }
 
-    private record ScheduleResult(boolean due, RunStatus status, boolean success, boolean shouldShiftProduction) {
+    private record ScheduleResult(boolean due, RunStatus status, boolean success) {
         static ScheduleResult notDue() {
-            return new ScheduleResult(false, null, false, false);
+            return new ScheduleResult(false, null, false);
         }
 
         static ScheduleResult lockBusy() {
-            return new ScheduleResult(true, RunStatus.RUNNING, false, false);
+            return new ScheduleResult(true, RunStatus.RUNNING, false);
         }
 
         static ScheduleResult running() {
-            return new ScheduleResult(true, RunStatus.RUNNING, false, false);
+            return new ScheduleResult(true, RunStatus.RUNNING, false);
         }
 
         static ScheduleResult failedBeforeRun() {
-            return new ScheduleResult(true, RunStatus.FAILED, false, true);
-        }
-
-        static ScheduleResult skippedCatchUp() {
-            return new ScheduleResult(true, null, false, true);
+            return new ScheduleResult(true, RunStatus.FAILED, false);
         }
 
         static ScheduleResult completed(RunStatus status) {
-            return new ScheduleResult(true, status, status == RunStatus.SUCCESS, status == RunStatus.FAILED);
+            return new ScheduleResult(true, status, status == RunStatus.SUCCESS);
         }
     }
 }

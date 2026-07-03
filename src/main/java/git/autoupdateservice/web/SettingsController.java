@@ -65,10 +65,16 @@ public class SettingsController {
     public static class SettingsForm {
         public boolean autoUpdateEnabled;
         public boolean dependencyGraphRebuildEnabled;
+        public int dependencyGraphRebuildWaitMinutes;
+        public boolean ignoreTestResults;
         public LocalTime testRunTime;
         public LocalDate nextTestRunDate;
         public LocalTime productionRunTime;
         public LocalDate nextProductionRunDate;
+        public boolean cleanupEnabled;
+        public LocalTime cleanupRunTime;
+        public LocalDate nextCleanupRunDate;
+        public int cleanupKeepDays;
         public String timezone;
         public String lockMessage;
         public String uccode;
@@ -88,14 +94,28 @@ public class SettingsController {
             this.dependencyGraphRebuildEnabled = dependencyGraphRebuildEnabled;
         }
 
+        public boolean isIgnoreTestResults() {
+            return ignoreTestResults;
+        }
+
+        public void setIgnoreTestResults(boolean ignoreTestResults) {
+            this.ignoreTestResults = ignoreTestResults;
+        }
+
         static SettingsForm from(Settings s) {
             SettingsForm f = new SettingsForm();
             f.autoUpdateEnabled = s.isAutoUpdateEnabled();
             f.dependencyGraphRebuildEnabled = s.isDependencyGraphRebuildEnabled();
+            f.dependencyGraphRebuildWaitMinutes = s.getDependencyGraphRebuildWaitMinutes();
+            f.ignoreTestResults = s.isIgnoreTestResults();
             f.testRunTime = s.getTestRunTime();
             f.nextTestRunDate = s.getNextTestRunDate();
             f.productionRunTime = s.getProductionRunTime();
             f.nextProductionRunDate = s.getNextProductionRunDate();
+            f.cleanupEnabled = s.isCleanupEnabled();
+            f.cleanupRunTime = s.getCleanupRunTime();
+            f.nextCleanupRunDate = s.getNextCleanupRunDate();
+            f.cleanupKeepDays = s.getCleanupKeepDays();
             f.timezone = s.getTimezone();
             f.lockMessage = s.getLockMessage();
             f.uccode = s.getUccode();
@@ -112,10 +132,16 @@ public class SettingsController {
             s.setId(1L);
             s.setAutoUpdateEnabled(autoUpdateEnabled);
             s.setDependencyGraphRebuildEnabled(dependencyGraphRebuildEnabled);
+            s.setDependencyGraphRebuildWaitMinutes(dependencyGraphRebuildWaitMinutes);
+            s.setIgnoreTestResults(ignoreTestResults);
             s.setTestRunTime(testRunTime);
             s.setNextTestRunDate(nextTestRunDate);
             s.setProductionRunTime(productionRunTime);
             s.setNextProductionRunDate(nextProductionRunDate);
+            s.setCleanupEnabled(cleanupEnabled);
+            s.setCleanupRunTime(cleanupRunTime);
+            s.setNextCleanupRunDate(nextCleanupRunDate);
+            s.setCleanupKeepDays(cleanupKeepDays);
             s.setTimezone(timezone);
             s.setLockMessage(lockMessage);
             s.setUccode(uccode);

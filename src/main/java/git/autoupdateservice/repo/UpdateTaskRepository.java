@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -27,6 +28,8 @@ public interface UpdateTaskRepository extends JpaRepository<UpdateTask, UUID> {
     List<UpdateTask> findReadyToRun(TaskStatus status);
 
     List<UpdateTask> findByStatusInOrderByCreatedAtAsc(Collection<TaskStatus> statuses);
+    long countByStatusInAndUpdatedAtBefore(Collection<TaskStatus> statuses, OffsetDateTime cutoff);
+    long deleteByStatusInAndUpdatedAtBefore(Collection<TaskStatus> statuses, OffsetDateTime cutoff);
 
     @Query("select t from UpdateTask t " +
             "where t.scheduledFor >= coalesce(:from, t.scheduledFor) " +

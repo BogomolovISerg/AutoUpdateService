@@ -29,8 +29,8 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class StepPlanLoader {
 
-    private static final String DEFAULT_TEST_CLASSPATH = "runner-test.default.json";
-    private static final String DEFAULT_PRODUCTION_CLASSPATH = "runner-prod.default.json";
+    private static final String DEFAULT_TEST_CLASSPATH = "runner-steps.default.json";
+    private static final String DEFAULT_PRODUCTION_CLASSPATH = "runner-steps.default.json";
 
     private final RunnerProperties runnerProperties;
     private final ObjectMapper objectMapper;
